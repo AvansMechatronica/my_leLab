@@ -1,0 +1,33 @@
+name: Sync frontend to Hugging Face Space
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/sync_space.yml'
+  workflow_dispatch:
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Push frontend/ to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          cd frontend
+          # HF's pre-receive hook rejects raw binaries, so the meshes go back to LFS.
+          echo 'public/so-101-urdf/meshes/*.stl filter=lfs diff=lfs merge=lfs -text' >> .gitattributes
+          git init -b main
+          git config user.email "ci@huggingface.co"
+          git config user.name "GitHub CI"
+          git add -A
+          git commit -m "Sync from leLab @ ${GITHUB_SHA}"
+          git remote add hf https://huggingface.co/spaces/lerobot/LeLab
+          git config credential.helper '!f() { echo "username=Nico-robot"; echo "password=$HF_TOKEN"; }; f'
+          git push -f hf main
