@@ -18,13 +18,17 @@ from __future__ import annotations
 import pytest
 
 
-def test_teleoperate_request_rejects_missing_fields() -> None:
-    from pydantic import ValidationError
-
+def test_teleoperate_request_defaults_to_so101_and_accepts_devices_without_ports() -> None:
     from lelab.teleoperate import TeleoperateRequest
 
-    with pytest.raises(ValidationError):
-        TeleoperateRequest()
+    request = TeleoperateRequest(
+        robot_type="lerobot_robot_ur",
+        teleoperator_type="lerobot_teleoperator_teachbot",
+    )
+    assert request.follower_port == ""
+    assert request.leader_port == ""
+    assert request.robot_type == "lerobot_robot_ur"
+    assert request.teleoperator_type == "lerobot_teleoperator_teachbot"
 
 
 def test_handle_teleoperation_status_returns_dict() -> None:
@@ -115,8 +119,8 @@ def test_start_teleoperation_reports_connection_failure(
         def disconnect(self) -> None:
             self.disconnected = True
 
-    monkeypatch.setattr(teleop, "SO101Follower", _Device)
-    monkeypatch.setattr(teleop, "SO101Leader", _Device)
+    monkeypatch.setattr(teleop, "make_robot", _Device)
+    monkeypatch.setattr(teleop, "make_teleoperator", _Device)
 
     request = teleop.TeleoperateRequest(
         leader_port="COM_LEADER",
@@ -172,9 +176,11 @@ def test_start_teleoperation_disconnects_follower_when_leader_fails(
 
     created: dict = {}
     monkeypatch.setattr(
-        teleop, "SO101Follower", lambda config: created.setdefault("follower", _Follower(config))
+        teleop, "make_robot", lambda config: created.setdefault("follower", _Follower(config))
     )
-    monkeypatch.setattr(teleop, "SO101Leader", lambda config: created.setdefault("leader", _Leader(config)))
+    monkeypatch.setattr(
+        teleop, "make_teleoperator", lambda config: created.setdefault("leader", _Leader(config))
+    )
 
     request = teleop.TeleoperateRequest(
         leader_port="COM_LEADER",
@@ -189,3 +195,68 @@ def test_start_teleoperation_disconnects_follower_when_leader_fails(
     # The already-connected follower must have been cleaned up.
     assert created["follower"].disconnected is True
     assert teleop.teleoperation_active is False
+
+
+def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lelab.teleoperate as teleop
+
+    monkeypatch.setattr(teleop, "teleoperation_active", False)
+    monkeypatch.setattr(
+        teleop,
+        "setup_calibration_files",
+        lambda *_args: pytest.fail("ROS devices must not load calibration files"),
+    )
+    monkeypatch.setattr(
+        teleop,
+        "make_robot_config",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        teleop,
+        "make_teleoperator_config",
+        lambda *_args, **_kwargs: object(),
+    )
+
+    class _ConnectedDevice:
+        is_connected = True
+        cameras: dict = {}
+
+        def __init__(self) -> None:
+            self.disconnected = False
+
+        def get_action(self) -> dict:
+            return {}
+
+        def send_action(self, _action) -> None:
+            teleop.teleoperation_active = False
+
+        def get_observation(self) -> dict:
+            return {}
+
+        def disconnect(self) -> None:
+            self.disconnected = True
+
+    robot = _ConnectedDevice()
+    teachbot = _ConnectedDevice()
+    monkeypatch.setattr(teleop, "make_robot", lambda _config: robot)
+    monkeypatch.setattr(teleop, "make_teleoperator", lambda _config: teachbot)
+
+    request = teleop.TeleoperateRequest(
+        leader_port="",
+        follower_port="",
+        leader_config="",
+        follower_config="",
+        robot_type="lerobot_robot_ur",
+        teleoperator_type="lerobot_teleoperator_teachbot",
+        robot_name="ur5",
+    )
+    result = teleop.handle_start_teleoperation(request)
+    assert result["success"] is True
+
+    assert teleop.teleoperation_thread is not None
+    teleop.teleoperation_thread.join(timeout=2)
+    assert not teleop.teleoperation_thread.is_alive()
+    assert robot.disconnected is False
+    assert teachbot.disconnected is False

@@ -166,6 +166,23 @@ def setup_follower_calibration_file(follower_config: str):
     return follower_config_name
 
 
+def setup_leader_calibration_file(leader_config: str):
+    """Setup leader calibration file in the correct location for teleoperation."""
+    leader_config_name = os.path.splitext(leader_config)[0]
+    leader_config_full_path = os.path.join(LEADER_CONFIG_PATH, leader_config)
+
+    os.makedirs(LEADER_CONFIG_PATH, exist_ok=True)
+    leader_target_path = os.path.join(LEADER_CONFIG_PATH, f"{leader_config_name}.json")
+
+    if not os.path.exists(leader_target_path):
+        if os.path.exists(leader_config_full_path):
+            shutil.copy2(leader_config_full_path, leader_target_path)
+        else:
+            raise FileNotFoundError(f"Leader calibration file not found: {leader_config_full_path}")
+
+    return leader_config_name
+
+
 def find_available_ports():
     """Find all available serial ports on the system"""
     try:
@@ -330,7 +347,14 @@ def get_default_robot_config(robot_type: str, available_configs: list):
 
 # Characters disallowed in a robot name (filesystem safety)
 _INVALID_NAME_CHARS = ("/", "\\", "..")
-_ROBOT_STRING_FIELDS = ("leader_port", "follower_port", "leader_config", "follower_config")
+_ROBOT_STRING_FIELDS = (
+    "leader_port",
+    "follower_port",
+    "leader_config",
+    "follower_config",
+    "robot_type",
+    "teleoperator_type",
+)
 _ROBOT_LIST_FIELDS = ("cameras",)
 
 
@@ -351,6 +375,8 @@ def _empty_record(name: str) -> dict:
     record: dict = {"name": name}
     for field in _ROBOT_STRING_FIELDS:
         record[field] = ""
+    record["robot_type"] = "so101_follower"
+    record["teleoperator_type"] = "so101_leader"
     for field in _ROBOT_LIST_FIELDS:
         record[field] = []
     return record
@@ -438,16 +464,40 @@ def delete_robot_record(name: str) -> bool:
 
 def is_robot_record_clean(record: dict) -> bool:
     """
-    A record is 'clean' when all four operational fields are populated AND both
-    referenced calibration files exist on disk. Cameras are optional and don't
-    affect cleanliness.
+    A record is ready when both device types are recognized and each SO-101
+    device has its port and calibration file. ROS-backed devices need neither.
+    Cameras are optional.
     """
     if not record:
         return False
-    for field in _ROBOT_STRING_FIELDS:
-        value = record.get(field, "")
-        if not isinstance(value, str) or not value.strip():
+
+    robot_type = record.get("robot_type", "so101_follower")
+    teleoperator_type = record.get("teleoperator_type", "so101_leader")
+    if not isinstance(robot_type, str) or not isinstance(teleoperator_type, str):
+        return False
+    if robot_type not in {"so101_follower", "lerobot_robot_ur"}:
+        return False
+    if teleoperator_type not in {"so101_leader", "lerobot_teleoperator_teachbot"}:
+        return False
+
+    if robot_type == "so101_follower":
+        if not all(
+            isinstance(record.get(field), str) and record[field].strip()
+            for field in ("follower_port", "follower_config")
+        ):
             return False
-    leader_path = os.path.join(LEADER_CONFIG_PATH, record["leader_config"])
-    follower_path = os.path.join(FOLLOWER_CONFIG_PATH, record["follower_config"])
-    return os.path.exists(leader_path) and os.path.exists(follower_path)
+        follower_path = os.path.join(FOLLOWER_CONFIG_PATH, record["follower_config"])
+        if not os.path.exists(follower_path):
+            return False
+
+    if teleoperator_type == "so101_leader":
+        if not all(
+            isinstance(record.get(field), str) and record[field].strip()
+            for field in ("leader_port", "leader_config")
+        ):
+            return False
+        leader_path = os.path.join(LEADER_CONFIG_PATH, record["leader_config"])
+        if not os.path.exists(leader_path):
+            return False
+
+    return True

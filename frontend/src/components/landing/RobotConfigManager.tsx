@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useApi } from "@/contexts/ApiContext";
 import { useToast } from "@/hooks/use-toast";
 import { RobotRecord } from "@/hooks/useRobots";
+import { serializeCameras } from "@/lib/cameraConfig";
 import RobotTile from "./RobotTile";
 
 interface RobotConfigManagerProps {
@@ -42,6 +43,10 @@ const RobotConfigManager: React.FC<RobotConfigManagerProps> = ({
           follower_port: robot.follower_port,
           leader_config: robot.leader_config,
           follower_config: robot.follower_config,
+          robot_type: robot.robot_type || "so101_follower",
+          teleoperator_type: robot.teleoperator_type || "so101_leader",
+          robot_name: robot.name,
+          cameras: serializeCameras(robot.cameras ?? []),
         }),
       });
       const data = await res.json();

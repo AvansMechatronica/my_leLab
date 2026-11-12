@@ -39,6 +39,14 @@ from lerobot.utils.utils import init_logging
 
 from .utils.config import is_valid_robot_name
 from .utils.devices import safe_disconnect_device
+from .utils.robot_devices import (
+    SO101_ROBOT_TYPE,
+    SO101_TELEOPERATOR_TYPE,
+    TEACHBOT_TYPE,
+    UR_ROBOT_TYPE,
+    robot_needs_calibration,
+    teleoperator_needs_calibration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +103,8 @@ class CalibrationRequest:
     """Request parameters for starting calibration"""
 
     device_type: Literal["robot", "teleop"]
-    port: str
-    config_file: str
+    port: str = ""
+    config_file: str = ""
     robot_name: str | None = None  # When set, write port + config back into the robot record on success
 
 
@@ -156,14 +164,52 @@ class CalibrationManager:
     def start_calibration(self, request: CalibrationRequest) -> dict[str, Any]:
         """Start calibration process"""
         try:
+            if request.robot_name:
+                if not is_valid_robot_name(request.robot_name):
+                    return {"success": False, "message": "Invalid robot name"}
+
+            if self.status.calibration_active:
+                return {"success": False, "message": "Calibration already active"}
+
+            if request.robot_name:
+                from .utils.config import get_robot_record
+
+                robot = get_robot_record(request.robot_name)
+                if robot is not None:
+                    device_type = (
+                        robot.get("robot_type", SO101_ROBOT_TYPE)
+                        if request.device_type == "robot"
+                        else robot.get("teleoperator_type", SO101_TELEOPERATOR_TYPE)
+                    )
+                    supported_types = (
+                        {SO101_ROBOT_TYPE, UR_ROBOT_TYPE}
+                        if request.device_type == "robot"
+                        else {SO101_TELEOPERATOR_TYPE, TEACHBOT_TYPE}
+                    )
+                    if device_type not in supported_types:
+                        return {"success": False, "message": "Unsupported device integration"}
+                    needs_calibration = (
+                        robot_needs_calibration(device_type)
+                        if request.device_type == "robot"
+                        else teleoperator_needs_calibration(device_type)
+                    )
+                    if not needs_calibration:
+                        message = "Calibration is not required for this device."
+                        self._update_status(
+                            calibration_active=False,
+                            status="completed",
+                            device_type=request.device_type,
+                            error=None,
+                            message=message,
+                            step=0,
+                        )
+                        return {"success": True, "message": message}
+
             # config_file becomes the LeRobot device id, and LeRobot writes the calibration to
             # calibration_dir / f"{id}.json", so reject path-traversal characters (/, \, ..) first.
             # Same guard as the calibration-config delete endpoint and robot records.
             if not is_valid_robot_name(request.config_file):
                 return {"success": False, "message": "Invalid configuration name"}
-
-            if self.status.calibration_active:
-                return {"success": False, "message": "Calibration already active"}
 
             # Reset status and clear any previous calibration data
             self._start_positions = {}

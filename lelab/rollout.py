@@ -42,13 +42,16 @@ from lerobot.utils.device_utils import auto_select_torch_device
 from .camera_config import lerobot_camera_settings, validate_camera_rotations
 from .utils.config import setup_follower_calibration_file
 from .utils.devices import follower_lock
+from .utils.robot_devices import SO101_ROBOT_TYPE, robot_needs_calibration
 
 logger = logging.getLogger(__name__)
 
 
 class InferenceRequest(BaseModel):
-    follower_port: str
-    follower_config: str
+    follower_port: str = ""
+    follower_config: str = ""
+    robot_type: str = SO101_ROBOT_TYPE
+    robot_name: str = ""
     policy_ref: str  # opaque ref returned by /jobs/{id}/checkpoints
     task: str = ""
     cameras: dict[str, dict[str, Any]] = {}
@@ -338,7 +341,11 @@ def handle_start_inference(request: InferenceRequest) -> dict[str, Any]:
         # .json extension. We need that stripped form for `--robot.id`,
         # because lerobot appends `.json` itself when constructing
         # `calibration_dir / f"{id}.json"`.
-        follower_id = setup_follower_calibration_file(request.follower_config)
+        follower_id = request.follower_config.removesuffix(".json") or (
+            request.robot_name or "robot"
+        )
+        if robot_needs_calibration(request.robot_type):
+            follower_id = setup_follower_calibration_file(request.follower_config)
         policy_path = _resolve_policy_path(request.policy_ref)
 
         cmd = [
@@ -348,14 +355,15 @@ def handle_start_inference(request: InferenceRequest) -> dict[str, Any]:
             "--strategy.type=base",
             f"--policy.path={policy_path}",
             f"--policy.device={auto_select_torch_device().type}",
-            "--robot.type=so101_follower",
-            f"--robot.port={request.follower_port}",
+            f"--robot.type={request.robot_type}",
             f"--robot.id={follower_id}",
             # JSON-quoted: draccus decodes a string as YAML, so "step 1: grab it" became a dict.
             f"--task={json.dumps(request.task)}",
             f"--duration={request.duration_s}",
             *_rollout_inference_args(policy_path),
         ]
+        if robot_needs_calibration(request.robot_type):
+            cmd.append(f"--robot.port={request.follower_port}")
         if request.cameras:
             cmd.append(f"--robot.cameras={_format_cameras_arg(request.cameras)}")
 
@@ -366,26 +374,24 @@ def handle_start_inference(request: InferenceRequest) -> dict[str, Any]:
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
-        # Feed a single newline into stdin so SOFollower.calibrate()'s
-        # `input("Press ENTER to use the calibration file ...")` returns "" and
-        # writes the existing calibration to the motors instead of hanging
-        # forever waiting for an interactive operator. Subsequent input()
-        # calls in the recalibration path get EOF and raise — which is fine,
-        # because we never want to enter that path from the UI.
+        # SO-101 calibration prompts are not interactive in the web process.
+        # ROS-backed robots have no calibration prompt and receive closed stdin.
+        seed_calibration_input = robot_needs_calibration(request.robot_type)
         proc = subprocess.Popen(
             cmd,
-            stdin=subprocess.PIPE,
+            stdin=subprocess.PIPE if seed_calibration_input else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=env,
         )
-        try:
-            assert proc.stdin is not None
-            proc.stdin.write(b"\n")
-            proc.stdin.flush()
-            proc.stdin.close()
-        except Exception as exc:
-            logger.warning("Failed to seed stdin for inference subprocess: %s", exc)
+        if seed_calibration_input:
+            try:
+                assert proc.stdin is not None
+                proc.stdin.write(b"\n")
+                proc.stdin.flush()
+                proc.stdin.close()
+            except Exception as exc:
+                logger.warning("Failed to seed stdin for inference subprocess: %s", exc)
         threading.Thread(
             target=_pump_stdout,
             args=(proc, log_handle),

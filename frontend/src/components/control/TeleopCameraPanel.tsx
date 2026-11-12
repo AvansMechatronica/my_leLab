@@ -11,7 +11,7 @@ import CameraFeed from "./CameraFeed";
 /**
  * Optional live camera panel for the teleoperation page. Off by default so we
  * never call getUserMedia just by landing on the page (same consent pattern as
- * the calibration camera toggle). Teleoperation opens no cv2 cameras, so the
+ * the calibration camera toggle). SO-101 teleoperation opens no cameras, so the
  * browser can stream them directly while the arm runs.
  *
  * A strict mirror of the selected robot's configured cameras: one live feed per
@@ -25,7 +25,6 @@ const TeleopCameraPanel: React.FC = () => {
   // attempt) — useful if a camera was unplugged and reconnected.
   const [reloadKey, setReloadKey] = useState(0);
   const { selectedRecord, isLoading: robotsLoading } = useRobots();
-  const { cameras: availableCameras } = useAvailableCameras({ enabled });
 
   // Feeds come solely from the robot's configured cameras, streamed by their
   // stored browser device_id or, in a browser that doesn't know that ID, by
@@ -33,6 +32,11 @@ const TeleopCameraPanel: React.FC = () => {
   // shows (name + failed-preview placeholder), so the user can tell it's
   // expected but not detected.
   const configured = selectedRecord?.cameras ?? [];
+  const robotOwnsCameraDevices =
+    selectedRecord?.robot_type === "lerobot_robot_ur" && configured.length > 0;
+  const { cameras: availableCameras } = useAvailableCameras({
+    enabled: enabled && !robotOwnsCameraDevices,
+  });
   const feeds = configured.map((c) => ({
     key: c.id,
     name: c.name,
@@ -61,17 +65,23 @@ const TeleopCameraPanel: React.FC = () => {
             </Button>
           )}
           <Label htmlFor="teleop-camera-toggle" className="text-sm text-gray-400">
-            {enabled ? "On" : "Off"}
+            {robotOwnsCameraDevices ? "Managed by robot" : enabled ? "On" : "Off"}
           </Label>
           <Switch
             id="teleop-camera-toggle"
             checked={enabled}
             onCheckedChange={setEnabled}
+            disabled={robotOwnsCameraDevices}
           />
         </div>
       </div>
 
-      {enabled ? (
+      {robotOwnsCameraDevices ? (
+        <p className="text-sm text-gray-500">
+          The UR integration opens these cameras directly. Browser preview is disabled to avoid
+          competing for the camera devices.
+        </p>
+      ) : enabled ? (
         feeds.length > 0 ? (
           <div className="flex flex-col gap-3 overflow-y-auto">
             {feeds.map((feed) => (

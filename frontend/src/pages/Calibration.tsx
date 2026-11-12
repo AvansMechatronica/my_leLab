@@ -74,6 +74,8 @@ interface RobotRecord {
   follower_port: string;
   leader_config: string;
   follower_config: string;
+  robot_type: string;
+  teleoperator_type: string;
   cameras: CameraConfig[];
   is_clean: boolean;
 }
@@ -90,6 +92,8 @@ const Calibration = () => {
   const demoVideoRef = useRef<HTMLDivElement>(null);
 
   const [deviceType, setDeviceType] = useState<string>("teleop");
+  const [robotType, setRobotType] = useState("so101_follower");
+  const [teleoperatorType, setTeleoperatorType] = useState("so101_leader");
   const [port, setPort] = useState<string>("");
   const [robot, setRobot] = useState<RobotRecord | null>(null);
   const [cameras, setCameras] = useState<CameraConfig[]>([]);
@@ -123,6 +127,8 @@ const Calibration = () => {
     (async () => {
       const r = await fetchRobot();
       if (!r || cancelled) return;
+      setRobotType(r.robot_type || "so101_follower");
+      setTeleoperatorType(r.teleoperator_type || "so101_leader");
       // Default to the first incomplete side in the checklist (leader, then follower).
       const defaultDevice = !r.leader_config
         ? "teleop"
@@ -426,6 +432,52 @@ const Calibration = () => {
     );
   };
 
+  const selectedIntegrationType =
+    deviceType === "robot" ? robotType : teleoperatorType;
+  const selectedDeviceNeedsCalibration =
+    selectedIntegrationType === "so101_follower" ||
+    selectedIntegrationType === "so101_leader";
+
+  const saveDeviceIntegration = async () => {
+    if (!robotName) return;
+    const typeField =
+      deviceType === "robot" ? "robot_type" : "teleoperator_type";
+    const configField =
+      deviceType === "robot" ? "follower_config" : "leader_config";
+    const portField =
+      deviceType === "robot" ? "follower_port" : "leader_port";
+    try {
+      const res = await fetchWithHeaders(
+        `${baseUrl}/robots/${encodeURIComponent(robotName)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            [typeField]: selectedIntegrationType,
+            ...(selectedDeviceNeedsCalibration
+              ? {}
+              : { [configField]: "", [portField]: "" }),
+          }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.robot) {
+        throw new Error(data.message || `HTTP ${res.status}`);
+      }
+      setRobot(data.robot);
+      toast({
+        title: "Device saved",
+        description: "This device does not require calibration.",
+      });
+    } catch (e) {
+      toast({
+        title: "Failed to save device",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    }
+  };
+
   // Refresh the robot record when a calibration completes so the checklist
   // flips to ✓ for the side that was just saved, and advance Device Type to
   // the next still-incomplete side (or stay on the current side if both done).
@@ -663,6 +715,41 @@ const Calibration = () => {
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="integrationType" className="text-sm font-medium text-slate-300">
+                  Integration *
+                </Label>
+                <Select
+                  value={selectedIntegrationType}
+                  onValueChange={(value) =>
+                    deviceType === "robot"
+                      ? setRobotType(value)
+                      : setTeleoperatorType(value)
+                  }
+                >
+                  <SelectTrigger
+                    id="integrationType"
+                    className="bg-slate-700 border-slate-600 text-white rounded-md"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700 text-white">
+                    {deviceType === "robot" ? (
+                      <>
+                        <SelectItem value="so101_follower">SO-101 Follower</SelectItem>
+                        <SelectItem value="lerobot_robot_ur">Universal Robot (ROS 2)</SelectItem>
+                      </>
+                    ) : (
+                      <>
+                        <SelectItem value="so101_leader">SO-101 Leader</SelectItem>
+                        <SelectItem value="lerobot_teleoperator_teachbot">Teachbot (ROS 2)</SelectItem>
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {selectedDeviceNeedsCalibration ? (
+              <div className="space-y-2">
                 <Label
                   htmlFor="port"
                   className="text-sm font-medium text-slate-300"
@@ -685,9 +772,19 @@ const Calibration = () => {
                   />
                 </div>
               </div>
+              ) : (
+                <Alert className="bg-blue-900/40 border-blue-700 text-blue-100">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    This ROS device uses the existing ROS connection and does
+                    not require a LeRobot calibration file or serial port.
+                  </AlertDescription>
+                </Alert>
+              )}
 
               <Separator className="bg-slate-700" />
 
+              {selectedDeviceNeedsCalibration ? (
               <div className="flex flex-col gap-3">
                 {!calibrationStatus.calibration_active ? (
                   <Button
@@ -748,6 +845,15 @@ const Calibration = () => {
                     </Collapsible>
                   )}
               </div>
+              ) : (
+                  <Button
+                    onClick={saveDeviceIntegration}
+                    disabled={!robotName}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-full py-6 text-lg"
+                  >
+                    Save device integration
+                  </Button>
+              )}
 
               {robot && (
                 <div className="space-y-2 pt-2">
@@ -755,37 +861,41 @@ const Calibration = () => {
                     Robot calibration
                   </div>
                   <div className="flex items-center gap-2 text-sm">
-                    {robot.leader_config ? (
+                    {robot.teleoperator_type === "lerobot_teleoperator_teachbot" || robot.leader_config ? (
                       <CheckCircle className="w-4 h-4 text-green-400" />
                     ) : (
                       <Circle className="w-4 h-4 text-slate-500" />
                     )}
                     <span
                       className={
-                        robot.leader_config ? "text-slate-200" : "text-slate-400"
+                        robot.teleoperator_type === "lerobot_teleoperator_teachbot" || robot.leader_config ? "text-slate-200" : "text-slate-400"
                       }
                     >
                       Leader (Teleoperator)
-                      {robot.leader_config && (
+                      {robot.teleoperator_type === "lerobot_teleoperator_teachbot" ? (
+                        <span className="text-slate-500"> · Teachbot (no calibration)</span>
+                      ) : robot.leader_config && (
                         <span className="text-slate-500"> · {robot.leader_config}</span>
                       )}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
-                    {robot.follower_config ? (
+                    {robot.robot_type === "lerobot_robot_ur" || robot.follower_config ? (
                       <CheckCircle className="w-4 h-4 text-green-400" />
                     ) : (
                       <Circle className="w-4 h-4 text-slate-500" />
                     )}
                     <span
                       className={
-                        robot.follower_config
+                        robot.robot_type === "lerobot_robot_ur" || robot.follower_config
                           ? "text-slate-200"
                           : "text-slate-400"
                       }
                     >
                       Follower (Robot)
-                      {robot.follower_config && (
+                      {robot.robot_type === "lerobot_robot_ur" ? (
+                        <span className="text-slate-500"> · UR (no calibration)</span>
+                      ) : robot.follower_config && (
                         <span className="text-slate-500"> · {robot.follower_config}</span>
                       )}
                     </span>

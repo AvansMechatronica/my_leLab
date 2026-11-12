@@ -46,6 +46,9 @@ interface RecordingConfig {
   follower_port: string;
   leader_config: string;
   follower_config: string;
+  robot_type: string;
+  teleoperator_type: string;
+  robot_name: string;
   dataset_repo_id: string;
   single_task: string;
   num_episodes: number;

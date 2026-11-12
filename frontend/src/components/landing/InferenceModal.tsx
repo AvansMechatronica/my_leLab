@@ -161,6 +161,8 @@ const InferenceModal: React.FC<Props> = ({
       await startInference(baseUrl, fetchWithHeaders, {
         follower_port: robot.follower_port,
         follower_config: robot.follower_config,
+        robot_type: robot.robot_type || "so101_follower",
+        robot_name: robot.name,
         policy_ref: selectedRef,
         task,
         cameras: cameraBindings.toCameraDict(DEFAULT_FPS),

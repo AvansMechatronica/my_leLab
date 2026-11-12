@@ -109,6 +109,8 @@ def test_robot_record_save_get_delete_round_trip(tmp_lerobot_home: Path) -> None
     assert loaded is not None
     assert loaded["name"] == "lab1"
     assert loaded["leader_port"] == "/dev/ttyUSB0"
+    assert loaded["robot_type"] == "so101_follower"
+    assert loaded["teleoperator_type"] == "so101_leader"
 
     listed = cfg.list_robot_records()
     assert any(r["name"] == "lab1" for r in listed)
@@ -143,6 +145,39 @@ def test_robot_record_merges_fields(tmp_lerobot_home: Path) -> None:
     assert loaded is not None
     assert loaded["leader_port"] == "/dev/a"
     assert loaded["follower_port"] == "/dev/b"
+
+
+def test_ros_robot_record_is_ready_without_ports_or_calibration_files() -> None:
+    from lelab.utils.config import is_robot_record_clean
+
+    record = {
+        "robot_type": "lerobot_robot_ur",
+        "teleoperator_type": "lerobot_teleoperator_teachbot",
+    }
+
+    assert is_robot_record_clean(record) is True
+    assert is_robot_record_clean({"robot_type": [], "teleoperator_type": "so101_leader"}) is False
+
+
+def test_so101_robot_record_still_requires_ports_and_calibration_files(
+    tmp_lerobot_home: Path,
+) -> None:
+    from lelab.utils import config as cfg
+
+    record = {
+        "robot_type": "so101_follower",
+        "teleoperator_type": "so101_leader",
+        "leader_port": "/dev/leader",
+        "follower_port": "/dev/follower",
+        "leader_config": "leader.json",
+        "follower_config": "follower.json",
+    }
+    assert cfg.is_robot_record_clean(record) is False
+
+    Path(cfg.LEADER_CONFIG_PATH, "leader.json").write_text("{}")
+    Path(cfg.FOLLOWER_CONFIG_PATH, "follower.json").write_text("{}")
+
+    assert cfg.is_robot_record_clean(record) is True
 
 
 def test_setup_calibration_files_copies_configs(

@@ -18,7 +18,15 @@ beforeEach(() => {
 afterEach(() => act(() => root.unmount()));
 test("profile reload keeps valid robots when another robot has an invalid saved rotation", async () => {
   const camera = { id: "wrist", name: "wrist", device_id: "usb", type: "opencv", width: 640, height: 480 };
-  const robot = { leader_port: "leader", follower_port: "follower", leader_config: "leader.json", follower_config: "follower.json", is_clean: true };
+  const robot = {
+    leader_port: "leader",
+    follower_port: "follower",
+    leader_config: "leader.json",
+    follower_config: "follower.json",
+    robot_type: "so101_follower",
+    teleoperator_type: "so101_leader",
+    is_clean: true,
+  };
   mocks.fetcher.mockResolvedValue(new Response(JSON.stringify({ robots: [
     { ...robot, name: "old", cameras: [camera] },
     { ...robot, name: "rotated", cameras: [{ ...camera, rotation: 180 }] },

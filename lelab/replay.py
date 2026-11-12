@@ -22,12 +22,17 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from lerobot.utils.robot_utils import precise_sleep
 
 from . import episode_media
 from .utils.config import setup_follower_calibration_file
 from .utils.devices import follower_lock, safe_disconnect_device
+from .utils.robot_devices import (
+    SO101_ROBOT_TYPE,
+    make_robot,
+    make_robot_config,
+    robot_needs_calibration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +45,10 @@ _stop = threading.Event()
 
 
 class ReplayRequest(BaseModel):
-    follower_port: str
-    follower_config: str
+    follower_port: str = ""
+    follower_config: str = ""
+    robot_type: str = SO101_ROBOT_TYPE
+    robot_name: str = ""
     dataset_repo_id: str
     episode_index: int
 
@@ -79,21 +86,32 @@ def handle_start_replay(request: ReplayRequest) -> dict[str, Any]:
     try:
         actions, fps = _episode_actions(request.dataset_repo_id, request.episode_index)
 
-        follower_id = setup_follower_calibration_file(request.follower_config)
-        robot = SO101Follower(SO101FollowerConfig(port=request.follower_port, id=follower_id))
-        try:
-            robot.bus.connect()
-        except Exception as e:
-            raise RuntimeError(
-                f"Could not connect to the follower arm on {request.follower_port}. "
-                "Make sure it's plugged in and powered on, then try again."
-            ) from e
-        # Feetech motors only store calibration registers with the torque off.
-        robot.bus.disable_torque()
-        robot.bus.write_calibration(robot.calibration)
-        robot.configure()
+        follower_id = request.follower_config.removesuffix(".json") or (
+            request.robot_name or "robot"
+        )
+        if robot_needs_calibration(request.robot_type):
+            follower_id = setup_follower_calibration_file(request.follower_config)
+
+        config = make_robot_config(
+            request.robot_type,
+            port=request.follower_port,
+            device_id=follower_id,
+        )
+        robot = make_robot(config)
+        if robot_needs_calibration(request.robot_type):
+            try:
+                robot.bus.connect()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Could not connect to the follower arm on {request.follower_port}. "
+                    "Make sure it's plugged in and powered on, then try again."
+                ) from e
+            robot.bus.disable_torque()
+            robot.bus.write_calibration(robot.calibration)
+            robot.configure()
     except Exception as e:
-        safe_disconnect_device(robot, logger)
+        if robot is not None and robot_needs_calibration(request.robot_type):
+            safe_disconnect_device(robot, logger)
         replay_active = False
         logger.error(f"Failed to start replay: {e}")
         return {"success": False, "message": str(e)}
@@ -112,7 +130,8 @@ def handle_start_replay(request: ReplayRequest) -> dict[str, Any]:
             logger.error(f"Replay failed: {e}")
             replay_error = str(e)
         finally:
-            safe_disconnect_device(robot, logger)
+            if robot_needs_calibration(request.robot_type):
+                safe_disconnect_device(robot, logger)
             replay_active = False
             logger.info("Replay ended")
 

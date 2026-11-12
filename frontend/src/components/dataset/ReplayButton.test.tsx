@@ -39,6 +39,8 @@ const calibrated: RobotRecord = {
   follower_port: "/dev/follower",
   leader_config: "leader.json",
   follower_config: "follower.json",
+  robot_type: "so101_follower",
+  teleoperator_type: "so101_leader",
   cameras: [],
   is_clean: true,
 };

@@ -20,11 +20,22 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
-from lerobot.teleoperators.so_leader import SO101Leader, SO101LeaderConfig
-
-from .utils.config import setup_calibration_files
+from .utils.config import (
+    setup_calibration_files,
+    setup_follower_calibration_file,
+    setup_leader_calibration_file,
+)
 from .utils.devices import follower_lock, safe_disconnect_device
+from .utils.robot_devices import (
+    SO101_ROBOT_TYPE,
+    SO101_TELEOPERATOR_TYPE,
+    make_robot,
+    make_robot_config,
+    make_teleoperator,
+    make_teleoperator_config,
+    robot_needs_calibration,
+    teleoperator_needs_calibration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +47,14 @@ current_teleop = None
 
 
 class TeleoperateRequest(BaseModel):
-    leader_port: str
-    follower_port: str
-    leader_config: str
-    follower_config: str
+    leader_port: str = ""
+    follower_port: str = ""
+    leader_config: str = ""
+    follower_config: str = ""
+    robot_type: str = SO101_ROBOT_TYPE
+    teleoperator_type: str = SO101_TELEOPERATOR_TYPE
+    robot_name: str = ""
+    cameras: dict[str, dict[str, Any]] = {}
 
 
 def get_joint_positions_from_robot(robot) -> dict[str, float]:
@@ -100,8 +115,8 @@ def get_joint_positions_from_robot(robot) -> dict[str, float]:
 def _safe_disconnect(device) -> None:
     """Disconnect a robot/teleop device, swallowing (but logging) any error.
 
-    Used on the connection-failure cleanup path so one device's failure can't
-    leave the other holding its serial port open.
+    Used on the SO-101 connection-failure cleanup path so one device's failure
+    can't leave the other holding its serial port open.
     """
     safe_disconnect_device(device, logger)
 
@@ -136,34 +151,54 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
             f"Starting teleoperation with leader port: {request.leader_port}, follower port: {request.follower_port}"
         )
 
-        # Setup calibration files
-        leader_config_name, follower_config_name = setup_calibration_files(
-            request.leader_config, request.follower_config
+        leader_config_name = request.leader_config.removesuffix(".json") or (
+            request.robot_name or "teachbot"
         )
+        follower_config_name = request.follower_config.removesuffix(".json") or (
+            request.robot_name or "ur"
+        )
+        if (
+            robot_needs_calibration(request.robot_type)
+            and teleoperator_needs_calibration(request.teleoperator_type)
+        ):
+            leader_config_name, follower_config_name = setup_calibration_files(
+                request.leader_config, request.follower_config
+            )
+        else:
+            if robot_needs_calibration(request.robot_type):
+                follower_config_name = setup_follower_calibration_file(request.follower_config)
+            if teleoperator_needs_calibration(request.teleoperator_type):
+                leader_config_name = setup_leader_calibration_file(request.leader_config)
 
-        # Create robot and teleop configs
-        robot_config = SO101FollowerConfig(
+        robot_config = make_robot_config(
+            request.robot_type,
             port=request.follower_port,
-            id=follower_config_name,
+            device_id=follower_config_name,
+            cameras=request.cameras if request.robot_type == SO101_ROBOT_TYPE else None,
         )
-
-        teleop_config = SO101LeaderConfig(
+        teleop_config = make_teleoperator_config(
+            request.teleoperator_type,
             port=request.leader_port,
-            id=leader_config_name,
+            device_id=leader_config_name,
         )
+        if request.robot_type != SO101_ROBOT_TYPE and request.cameras:
+            robot_config.cameras = _record._build_camera_configs(
+                request.cameras, _record._platform_backend()
+            )
 
         # Connect synchronously. If either device fails to connect, clean up the
         # other (so its serial port is released) and report the error — do NOT
         # leave the caller thinking teleoperation started.
         logger.info("Initializing robot and teleop device...")
-        robot = SO101Follower(robot_config)
-        teleop_device = SO101Leader(teleop_config)
+        robot = make_robot(robot_config)
+        teleop_device = make_teleoperator(teleop_config)
 
         # Connect each arm separately so the error names which one failed and
         # tells the user what to do, instead of a generic "failed to start".
         logger.info("Connecting to follower arm...")
         try:
-            robot.bus.connect()
+            if robot_needs_calibration(request.robot_type):
+                robot.bus.connect()
         except Exception as e:
             raise RuntimeError(
                 f"Could not connect to the follower arm on {request.follower_port}. "
@@ -172,7 +207,8 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
 
         logger.info("Connecting to leader arm...")
         try:
-            teleop_device.bus.connect()
+            if teleoperator_needs_calibration(request.teleoperator_type):
+                teleop_device.bus.connect()
         except Exception as e:
             raise RuntimeError(
                 f"Could not connect to the leader arm on {request.leader_port}. "
@@ -181,25 +217,30 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
 
         # Feetech motors only store calibration registers with the torque off,
         # which also opens their EEPROM lock.
-        logger.info("Writing calibration to motors...")
-        robot.bus.disable_torque()
-        robot.bus.write_calibration(robot.calibration)
-        teleop_device.bus.disable_torque()
-        teleop_device.bus.write_calibration(teleop_device.calibration)
+        if robot_needs_calibration(request.robot_type):
+            logger.info("Writing follower calibration to motors...")
+            robot.bus.disable_torque()
+            robot.bus.write_calibration(robot.calibration)
+        if teleoperator_needs_calibration(request.teleoperator_type):
+            logger.info("Writing leader calibration to motors...")
+            teleop_device.bus.disable_torque()
+            teleop_device.bus.write_calibration(teleop_device.calibration)
 
         # Connect cameras and configure motors
         logger.info("Connecting cameras and configuring motors...")
-        for cam in robot.cameras.values():
-            cam.connect()
-        robot.configure()
-        teleop_device.configure()
+        if robot_needs_calibration(request.robot_type):
+            for cam in robot.cameras.values():
+                cam.connect()
+            robot.configure()
+        if teleoperator_needs_calibration(request.teleoperator_type):
+            teleop_device.configure()
         logger.info("Successfully connected to both devices")
 
         current_robot = robot
         current_teleop = teleop_device
 
-        # Stream the arms in the background; the worker owns disconnect so stop()
-        # does not race the serial bus from the request thread.
+        # Stream the arms in the background; the worker disconnects SO-101
+        # devices while ROS-backed devices remain cached between sessions.
         def teleoperation_worker():
             global teleoperation_active, current_robot, current_teleop
 
@@ -231,8 +272,10 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
             except Exception as e:
                 logger.error(f"Error during teleoperation loop: {e}")
             finally:
-                _safe_disconnect(robot)
-                _safe_disconnect(teleop_device)
+                if robot_needs_calibration(request.robot_type):
+                    _safe_disconnect(robot)
+                if teleoperator_needs_calibration(request.teleoperator_type):
+                    _safe_disconnect(teleop_device)
                 logger.info("Teleoperation stopped")
                 teleoperation_active = False
                 current_robot = None
@@ -253,8 +296,10 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
     except Exception as e:
         # Connection (or setup) failed before the loop started: release any
         # device that did open, reset state, and surface the error.
-        _safe_disconnect(robot)
-        _safe_disconnect(teleop_device)
+        if robot is not None and robot_needs_calibration(request.robot_type):
+            _safe_disconnect(robot)
+        if teleop_device is not None and teleoperator_needs_calibration(request.teleoperator_type):
+            _safe_disconnect(teleop_device)
         teleoperation_active = False
         current_robot = None
         current_teleop = None
@@ -268,8 +313,7 @@ def handle_stop_teleoperation() -> dict[str, Any]:
     """Handle stop teleoperation request.
 
     Signals the worker via `teleoperation_active = False` and waits for it to
-    exit. The worker owns the disconnect call, so this avoids racing the
-    serial bus from the request thread.
+    exit. The worker owns SO-101 disconnects, avoiding a race on the serial bus.
     """
     global teleoperation_active, teleoperation_thread
 

@@ -4,6 +4,8 @@ import { CameraRequest } from "./cameraConfig";
 export interface StartInferenceRequest {
   follower_port: string;
   follower_config: string;
+  robot_type: string;
+  robot_name: string;
   policy_ref: string;
   task: string;
   cameras: Record<string, CameraRequest>;

@@ -12,7 +12,7 @@
 
 </div>
 
-**LeLab** is a web app that puts the full LeRobot workflow — calibrate, teleoperate, record, train, replay — into a single browser UI. Plug in your arm, open the app, and go. No CLI gymnastics, no keyboard prompts.
+**LeLab** is a web app that puts the full LeRobot workflow — device setup, teleoperate, record, train, replay — into a single browser UI. Plug in your arm, open the app, and go. No CLI gymnastics, no keyboard prompts.
 
 🤗 A web-native front door to LeRobot, designed so newcomers can get from "unboxing" to "training their first policy" in minutes.
 
@@ -29,8 +29,8 @@ A page will automatically open in your browser and you are ready to go.
 <div align="center">
   <table>
     <tr>
-      <td>🎯 <b>Calibrate</b></td>
-      <td>Guided web flow for both arms — no keyboard prompts.</td>
+      <td>🎯 <b>Device setup</b></td>
+      <td>Guided SO-101 calibration, or select a ROS 2 device integration that needs no calibration.</td>
     </tr>
     <tr>
       <td>🕹️ <b>Teleoperate</b></td>
@@ -62,6 +62,18 @@ A page will automatically open in your browser and you are ready to go.
     </tr>
   </table>
 </div>
+
+## ROS 2 robot integrations
+
+LeLab can use `lerobot-robot-ur` with `lerobot-teleoperator-teachbot` alongside SO-101 devices. Install both packages into the same Python environment as LeLab, following the ROS 2 prerequisites in the [integration repository](https://github.com/AvansMechatronica/my_lerobot_ros):
+
+```bash
+git clone https://github.com/AvansMechatronica/my_lerobot_ros.git
+pip install -e my_lerobot_ros/lerobot-robot-ur
+pip install -e my_lerobot_ros/lerobot-teleoperator-teachbot
+```
+
+Start the ROS 2 robot and Teachbot drivers before starting a LeLab session. Select **Universal Robot (ROS 2)** and **Teachbot (ROS 2)** in the device setup page; LeLab keeps their ROS connections open between teleoperation, recording, and replay sessions and closes them when the app exits.
 
 ## Camera rotation
 

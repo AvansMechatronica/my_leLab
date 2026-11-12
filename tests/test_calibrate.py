@@ -325,6 +325,33 @@ def test_calibration_manager_rejects_unsafe_config_name(config_file) -> None:
     assert mgr.calibration_thread is None
 
 
+def test_calibration_is_skipped_for_ros_devices(monkeypatch: pytest.MonkeyPatch) -> None:
+    from lelab.calibrate import CalibrationManager, CalibrationRequest
+
+    monkeypatch.setattr(
+        "lelab.utils.config.get_robot_record",
+        lambda _name: {
+            "robot_type": "lerobot_robot_ur",
+            "teleoperator_type": "lerobot_teleoperator_teachbot",
+        },
+    )
+    mgr = CalibrationManager()
+
+    result = mgr.start_calibration(
+        CalibrationRequest(
+            device_type="robot",
+            port="",
+            config_file="",
+            robot_name="ur5",
+        )
+    )
+
+    assert result == {"success": True, "message": "Calibration is not required for this device."}
+    assert mgr.calibration_thread is None
+    assert mgr.status.calibration_active is False
+    assert mgr.status.status == "completed"
+
+
 def test_cleanup_device_force_releases_and_clears_when_disconnect_fails() -> None:
     """A failed device.disconnect() must still force-close the port and clear the
     device handle — otherwise the COM port stays busy and blocks the next run."""

@@ -80,7 +80,7 @@ const RobotTile: React.FC<RobotTileProps> = ({
                   <Settings className="w-4 h-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Configure (calibrate)</TooltipContent>
+              <TooltipContent>Configure device integrations and calibration</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
