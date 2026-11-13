@@ -1,7 +1,11 @@
-<h1 align="center">🦾 LeLab</h1>
+<h1 align="center">🦾 LeLab for UR5 and Teachbot</h1>
 
 <p align="center">
-  <b>The official graphical interface for <a href="https://github.com/huggingface/lerobot">LeRobot</a>.</b>
+  <b>The unofficial graphical interface for <a href="https://github.com/huggingface/lerobot">LeRobot</a>.</b>
+</p>
+
+<p align="center">
+  <b>Integration with ROS 2 Universal Robots and Teachbot.</b>
 </p>
 
 <div align="center">
@@ -16,13 +20,38 @@
 
 🤗 A web-native front door to LeRobot, designed so newcomers can get from "unboxing" to "training their first policy" in minutes.
 
-🤗 Install and run everything with a single command.
 
 ## Quick Start
+Install LeLab in a virtual environment:
 
-Grab the one-liner from the [LeLab Space](https://huggingface.co/spaces/lerobot/LeLab) — it installs and runs LeLab + LeRobot in a single command.
+```bash
+# Check that Python 3.12 is available for ROS 2 Jazzy
+python3 --version
 
-A page will automatically open in your browser and you are ready to go.
+# Create a virtual Python environment in the lerobot directory
+mkdir ~/lelab
+cd ~/lelab  
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install the LeLab software
+git clone https://github.com/AvansMechatronica/my_leLab.git
+cd my_leLab
+pip install -e .
+
+```
+
+## Start LeLab
+
+To start LeLab, run the following command in your terminal:
+
+```bash
+cd ~/lelab  
+source .venv/bin/activate
+leLab
+```
+
+
 
 ## What you can do
 
@@ -97,15 +126,6 @@ The setting applies to new observations; it does not change existing recordings 
 - **[Discord](https://discord.gg/q8Dzzpym3f):** chat with the LeRobot community.
 - **[CLAUDE.md](CLAUDE.md):** architecture rundown for contributors.
 
-## Contribute
-
-PRs welcome. Hot-reload mode for working on the code:
-
-```bash
-lelab --dev
-```
-
-Vite on `:8080`, uvicorn `--reload` on `:8000`. Installing LeLab builds the frontend bundle, so PRs never include `frontend/dist`.
 
 <div align="center">
 <sub>Originally hacked together by <a href="https://www.linkedin.com/posts/nicolas-rabault-_lerobot-hackathon-lerobot-ugcPost-7341065019368828930-jTnl/">Team LeLab at the 2025 LeRobot Worldwide Hackathon 🏆</a>, now maintained by the <a href="https://huggingface.co/lerobot">LeRobot</a> team at <a href="https://huggingface.co">Hugging Face</a> with ❤️</sub>
