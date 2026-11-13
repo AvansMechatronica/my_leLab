@@ -32,7 +32,11 @@ interface UrdfViewerElement extends HTMLElement {
   setJointValue?: (jointName: string, value: number) => void;
 }
 
-const UrdfViewer: React.FC = () => {
+interface UrdfViewerProps {
+  robotType?: string;
+}
+
+const UrdfViewer: React.FC<UrdfViewerProps> = ({ robotType }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [highlightedJoint, setHighlightedJoint] = useState<string | null>(null);
   const { registerUrdfProcessor, alternativeUrdfModels, isDefaultModel } =
@@ -142,7 +146,9 @@ const UrdfViewer: React.FC = () => {
 
     // Determine which URDF to load - fixed path to match the actual available file
     const urdfPath = isDefaultModel
-      ? "/so-101-urdf/urdf/so101_new_calib.urdf"
+      ? robotType === "lerobot_robot_ur"
+        ? "/ur_urdf/urdf/ur.urdf"
+        : "/so-101-urdf/urdf/so101_new_calib.urdf"
       : customUrdfPath || "";
 
     // Set the package path for the default model
@@ -262,6 +268,7 @@ const UrdfViewer: React.FC = () => {
     };
   }, [
     isDefaultModel,
+    robotType,
     customUrdfPath,
     urlModifierFunc,
     defaultUrlModifier,

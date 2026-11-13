@@ -93,6 +93,61 @@ def test_get_joint_positions_maps_degrees_to_radians_without_correction() -> Non
     assert positions["Jaw"] == pytest.approx(math.radians(50.0))
 
 
+def test_get_joint_positions_maps_ur_observations_in_radians() -> None:
+    from lelab.teleoperate import get_joint_positions_from_robot
+
+    class _Robot:
+        def get_observation(self):
+            return {
+                "shoulder_pan_joint.pos": 1.25,
+                "shoulder_lift_joint.pos": -0.75,
+                "elbow_joint.pos": 0.5,
+                "wrist_1_joint.pos": -1.5,
+                "wrist_2_joint.pos": 2.0,
+                "wrist_3_joint.pos": -2.5,
+                "camera": object(),
+            }
+
+    positions = get_joint_positions_from_robot(_Robot(), "lerobot_robot_ur")
+    assert positions == {
+        "shoulder_pan_joint": 1.25,
+        "shoulder_lift_joint": -0.75,
+        "elbow_joint": 0.5,
+        "wrist_1_joint": -1.5,
+        "wrist_2_joint": 2.0,
+        "wrist_3_joint": -2.5,
+    }
+
+
+def test_get_joint_positions_omits_missing_ur_joints(caplog: pytest.LogCaptureFixture) -> None:
+    import lelab.teleoperate as teleop
+
+    class _Robot:
+        def get_observation(self):
+            return {"shoulder_pan_joint.pos": 0.5}
+
+    if hasattr(teleop.get_joint_positions_from_robot, "_last_ur_warning"):
+        del teleop.get_joint_positions_from_robot._last_ur_warning
+    positions = teleop.get_joint_positions_from_robot(_Robot(), "lerobot_robot_ur")
+    assert positions == {"shoulder_pan_joint": 0.5}
+    assert "shoulder_lift_joint.pos" in caplog.text
+
+
+def test_joint_positions_endpoint_uses_active_robot_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    import lelab.teleoperate as teleop
+
+    class _Robot:
+        def get_observation(self):
+            return {"shoulder_pan_joint.pos": 1.25}
+
+    monkeypatch.setattr(teleop, "teleoperation_active", True)
+    monkeypatch.setattr(teleop, "current_robot", _Robot())
+    monkeypatch.setattr(teleop, "current_robot_type", "lerobot_robot_ur")
+    result = teleop.handle_get_joint_positions()
+    assert result["success"] is True
+    assert result["joint_positions"] == {"shoulder_pan_joint": 1.25}
+
+
 def test_start_teleoperation_reports_connection_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -233,7 +288,7 @@ def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
             teleop.teleoperation_active = False
 
         def get_observation(self) -> dict:
-            return {}
+            return {"shoulder_pan_joint.pos": 1.25}
 
         def disconnect(self) -> None:
             self.disconnected = True
@@ -252,7 +307,15 @@ def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
         teleoperator_type="lerobot_teleoperator_teachbot",
         robot_name="ur5",
     )
-    result = teleop.handle_start_teleoperation(request)
+    class _Manager:
+        active_connections = [object()]
+        messages: list[dict] = []
+
+        def broadcast_joint_data_sync(self, data: dict) -> None:
+            self.messages.append(data)
+
+    manager = _Manager()
+    result = teleop.handle_start_teleoperation(request, manager)
     assert result["success"] is True
 
     assert teleop.teleoperation_thread is not None
@@ -260,3 +323,4 @@ def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
     assert not teleop.teleoperation_thread.is_alive()
     assert robot.disconnected is False
     assert teachbot.disconnected is False
+    assert manager.messages[0]["joints"] == {"shoulder_pan_joint": 1.25}

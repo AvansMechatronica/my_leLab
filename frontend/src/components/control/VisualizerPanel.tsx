@@ -8,6 +8,7 @@ import Logo from "@/components/Logo";
 interface VisualizerPanelProps {
   onGoBack: () => void;
   className?: string;
+  robotType?: string;
   /** Optional content rendered as a column beside the 3D viewer (e.g. a camera panel). */
   rightSlot?: React.ReactNode;
 }
@@ -15,6 +16,7 @@ interface VisualizerPanelProps {
 const VisualizerPanel: React.FC<VisualizerPanelProps> = ({
   onGoBack,
   className,
+  robotType,
   rightSlot,
 }) => {
   return (
@@ -39,7 +41,7 @@ const VisualizerPanel: React.FC<VisualizerPanelProps> = ({
           <h2 className="text-xl font-medium text-gray-200">Teleoperation</h2>
         </div>
         <div className="flex-1 bg-black rounded border border-gray-800 min-h-[50vh] lg:min-h-0">
-          <UrdfViewer />
+          <UrdfViewer robotType={robotType} />
         </div>
       </div>
       {rightSlot && (

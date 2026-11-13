@@ -29,6 +29,7 @@ from .utils.devices import follower_lock, safe_disconnect_device
 from .utils.robot_devices import (
     SO101_ROBOT_TYPE,
     SO101_TELEOPERATOR_TYPE,
+    UR_ROBOT_TYPE,
     make_robot,
     make_robot_config,
     make_teleoperator,
@@ -44,6 +45,7 @@ teleoperation_active = False
 teleoperation_thread: threading.Thread | None = None
 current_robot = None
 current_teleop = None
+current_robot_type = SO101_ROBOT_TYPE
 
 
 class TeleoperateRequest(BaseModel):
@@ -57,7 +59,7 @@ class TeleoperateRequest(BaseModel):
     cameras: dict[str, dict[str, Any]] = {}
 
 
-def get_joint_positions_from_robot(robot) -> dict[str, float]:
+def get_joint_positions_from_robot(robot, robot_type: str = SO101_ROBOT_TYPE) -> dict[str, float]:
     """
     Extract current joint positions from the robot and convert to URDF joint format.
 
@@ -68,8 +70,11 @@ def get_joint_positions_from_robot(robot) -> dict[str, float]:
     joint. (The gripper reports 0–100 rather than degrees, but that range lands
     inside the Jaw limit, matching the open/closed sweep.)
 
+    UR observations use ROS joint names and are already in radians.
+
     Args:
-        robot: The robot instance (SO101Follower)
+        robot: The follower robot instance.
+        robot_type: The configured follower type.
 
     Returns:
         Dictionary mapping URDF joint names to radian values
@@ -85,6 +90,30 @@ def get_joint_positions_from_robot(robot) -> dict[str, float]:
 
     try:
         observation = robot.get_observation()
+
+        if robot_type == UR_ROBOT_TYPE:
+            ur_joint_names = (
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_1_joint",
+                "wrist_2_joint",
+                "wrist_3_joint",
+                "robotiq_85_left_knuckle_joint",
+            )
+            positions = {
+                name: observation[f"{name}.pos"]
+                for name in ur_joint_names
+                if f"{name}.pos" in observation
+            }
+            missing = [
+                f"{name}.pos" for name in ur_joint_names[:6] if f"{name}.pos" not in observation
+            ]
+            now = time.monotonic()
+            if missing and now - getattr(get_joint_positions_from_robot, "_last_ur_warning", -math.inf) >= 5:
+                logger.warning("UR joint positions not available: %s", ", ".join(missing))
+                get_joint_positions_from_robot._last_ur_warning = now
+            return positions
 
         joint_positions: dict[str, float] = {}
         debug_rows = []
@@ -109,6 +138,8 @@ def get_joint_positions_from_robot(robot) -> dict[str, float]:
 
     except Exception as e:
         logger.error(f"Error getting joint positions: {e}")
+        if robot_type == UR_ROBOT_TYPE:
+            return {}
         return dict.fromkeys(motor_to_urdf_mapping.values(), 0.0)
 
 
@@ -129,7 +160,7 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
     dying silently in the worker thread while the API has already claimed
     success. Only the teleoperation loop runs in the background thread.
     """
-    global teleoperation_active, teleoperation_thread, current_robot, current_teleop
+    global teleoperation_active, teleoperation_thread, current_robot, current_teleop, current_robot_type
 
     from . import record as _record, replay as _replay, rollout as _rollout
 
@@ -238,6 +269,7 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
 
         current_robot = robot
         current_teleop = teleop_device
+        current_robot_type = request.robot_type
 
         # Stream the arms in the background; the worker disconnects SO-101
         # devices while ROS-backed devices remain cached between sessions.
@@ -256,7 +288,7 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
                     current_time = time.time()
                     if current_time - last_broadcast_time >= broadcast_interval:
                         try:
-                            joint_positions = get_joint_positions_from_robot(robot)
+                            joint_positions = get_joint_positions_from_robot(robot, request.robot_type)
                             joint_data = {
                                 "type": "joint_update",
                                 "joints": joint_positions,
@@ -352,7 +384,7 @@ def handle_get_joint_positions() -> dict[str, Any]:
         return {"success": False, "message": "No active teleoperation session"}
 
     try:
-        joint_positions = get_joint_positions_from_robot(current_robot)
+        joint_positions = get_joint_positions_from_robot(current_robot, current_robot_type)
         return {"success": True, "joint_positions": joint_positions, "timestamp": time.time()}
     except Exception as e:
         logger.error(f"Error getting joint positions: {e}")
