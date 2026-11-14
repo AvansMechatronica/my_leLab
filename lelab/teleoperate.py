@@ -45,6 +45,7 @@ teleoperation_active = False
 teleoperation_thread: threading.Thread | None = None
 current_robot = None
 current_teleop = None
+current_teleop_cameras: dict[str, Any] = {}
 current_robot_type = SO101_ROBOT_TYPE
 
 
@@ -152,6 +153,52 @@ def _safe_disconnect(device) -> None:
     safe_disconnect_device(device, logger)
 
 
+def _make_managed_cameras(camera_data: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Create cameras managed by LeLab rather than by a persistent robot."""
+    if not camera_data:
+        return {}
+
+    from lerobot.cameras.opencv import OpenCVCamera
+
+    from . import record
+
+    configs = record._build_camera_configs(camera_data, record._platform_backend())
+    return {name: OpenCVCamera(config) for name, config in configs.items()}
+
+
+def _disconnect_cameras(cameras: dict[str, Any]) -> None:
+    for name, camera in cameras.items():
+        try:
+            camera.disconnect()
+        except Exception as e:
+            logger.warning("Failed to disconnect teleoperation camera %s: %s", name, e)
+
+
+def teleoperation_camera_feed_frames(cam_key: str, fps: float = 15.0):
+    """Yield MJPEG frames from a camera connected for the active teleoperation."""
+    import cv2
+
+    interval = 1.0 / fps
+    while teleoperation_active:
+        camera = current_teleop_cameras.get(cam_key)
+        if camera is None:
+            break
+        try:
+            frame = camera.read_latest()
+        except (TimeoutError, RuntimeError):
+            time.sleep(interval)
+            continue
+        except Exception as e:
+            logger.warning("teleoperation camera feed %s: unexpected read error: %s", cam_key, e)
+            break
+
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        ok, buf = cv2.imencode(".jpg", bgr)
+        if ok:
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        time.sleep(interval)
+
+
 def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=None) -> dict[str, Any]:
     """Handle start teleoperation request.
 
@@ -160,7 +207,8 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
     dying silently in the worker thread while the API has already claimed
     success. Only the teleoperation loop runs in the background thread.
     """
-    global teleoperation_active, teleoperation_thread, current_robot, current_teleop, current_robot_type
+    global teleoperation_active, teleoperation_thread, current_robot, current_teleop
+    global current_teleop_cameras, current_robot_type
 
     from . import record as _record, replay as _replay, rollout as _rollout
 
@@ -177,6 +225,7 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
 
     robot = None
     teleop_device = None
+    managed_cameras: dict[str, Any] = {}
     try:
         logger.info(
             f"Starting teleoperation with leader port: {request.leader_port}, follower port: {request.follower_port}"
@@ -212,11 +261,6 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
             port=request.leader_port,
             device_id=leader_config_name,
         )
-        if request.robot_type != SO101_ROBOT_TYPE and request.cameras:
-            robot_config.cameras = _record._build_camera_configs(
-                request.cameras, _record._platform_backend()
-            )
-
         # Connect synchronously. If either device fails to connect, clean up the
         # other (so its serial port is released) and report the error — do NOT
         # leave the caller thinking teleoperation started.
@@ -263,18 +307,24 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
             for cam in robot.cameras.values():
                 cam.connect()
             robot.configure()
+            managed_cameras = robot.cameras
+        elif request.robot_type == UR_ROBOT_TYPE:
+            managed_cameras = _make_managed_cameras(request.cameras)
+            for cam in managed_cameras.values():
+                cam.connect()
         if teleoperator_needs_calibration(request.teleoperator_type):
             teleop_device.configure()
         logger.info("Successfully connected to both devices")
 
         current_robot = robot
         current_teleop = teleop_device
+        current_teleop_cameras = managed_cameras
         current_robot_type = request.robot_type
 
         # Stream the arms in the background; the worker disconnects SO-101
         # devices while ROS-backed devices remain cached between sessions.
         def teleoperation_worker():
-            global teleoperation_active, current_robot, current_teleop
+            global teleoperation_active, current_robot, current_teleop, current_teleop_cameras
 
             logger.info("Starting teleoperation loop...")
             try:
@@ -304,12 +354,15 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
             except Exception as e:
                 logger.error(f"Error during teleoperation loop: {e}")
             finally:
+                teleoperation_active = False
+                current_teleop_cameras = {}
                 if robot_needs_calibration(request.robot_type):
                     _safe_disconnect(robot)
+                else:
+                    _disconnect_cameras(managed_cameras)
                 if teleoperator_needs_calibration(request.teleoperator_type):
                     _safe_disconnect(teleop_device)
                 logger.info("Teleoperation stopped")
-                teleoperation_active = False
                 current_robot = None
                 current_teleop = None
 
@@ -330,11 +383,14 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
         # device that did open, reset state, and surface the error.
         if robot is not None and robot_needs_calibration(request.robot_type):
             _safe_disconnect(robot)
+        elif managed_cameras:
+            _disconnect_cameras(managed_cameras)
         if teleop_device is not None and teleoperator_needs_calibration(request.teleoperator_type):
             _safe_disconnect(teleop_device)
         teleoperation_active = False
         current_robot = None
         current_teleop = None
+        current_teleop_cameras = {}
         logger.error(f"Failed to start teleoperation: {e}")
         # str(e) is already a user-facing message for the connection failures
         # raised above; the toast title supplies the "error starting" context.

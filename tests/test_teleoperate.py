@@ -252,7 +252,7 @@ def test_start_teleoperation_disconnects_follower_when_leader_fails(
     assert teleop.teleoperation_active is False
 
 
-def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
+def test_ros_devices_skip_calibration_and_manage_cameras_in_lelab(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import lelab.teleoperate as teleop
@@ -263,10 +263,15 @@ def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
         "setup_calibration_files",
         lambda *_args: pytest.fail("ROS devices must not load calibration files"),
     )
+
+    class _RobotConfig:
+        cameras: dict = {}
+
+    robot_config = _RobotConfig()
     monkeypatch.setattr(
         teleop,
         "make_robot_config",
-        lambda *_args, **_kwargs: object(),
+        lambda *_args, **_kwargs: robot_config,
     )
     monkeypatch.setattr(
         teleop,
@@ -293,7 +298,21 @@ def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
         def disconnect(self) -> None:
             self.disconnected = True
 
+    class _Camera:
+        def __init__(self) -> None:
+            self.connected = False
+            self.disconnected = False
+
+        def connect(self) -> None:
+            self.connected = True
+
+        def disconnect(self) -> None:
+            self.disconnected = True
+
     robot = _ConnectedDevice()
+    robot.cameras = {"front": _Camera()}
+    camera = _Camera()
+    monkeypatch.setattr(teleop, "_make_managed_cameras", lambda _data: {"front": camera})
     teachbot = _ConnectedDevice()
     monkeypatch.setattr(teleop, "make_robot", lambda _config: robot)
     monkeypatch.setattr(teleop, "make_teleoperator", lambda _config: teachbot)
@@ -306,6 +325,7 @@ def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
         robot_type="lerobot_robot_ur",
         teleoperator_type="lerobot_teleoperator_teachbot",
         robot_name="ur5",
+        cameras={"front": {"type": "opencv", "camera_index": 0}},
     )
     class _Manager:
         active_connections = [object()]
@@ -323,4 +343,8 @@ def test_ros_devices_skip_calibration_and_stay_connected_after_teleoperation(
     assert not teleop.teleoperation_thread.is_alive()
     assert robot.disconnected is False
     assert teachbot.disconnected is False
+    assert camera.connected is True
+    assert camera.disconnected is True
+    assert robot.cameras["front"].disconnected is False
+    assert robot_config.cameras == {}
     assert manager.messages[0]["joints"] == {"shoulder_pan_joint": 1.25}

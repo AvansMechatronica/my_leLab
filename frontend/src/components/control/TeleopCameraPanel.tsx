@@ -4,15 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useRobots } from "@/hooks/useRobots";
-import { useAvailableCameras } from "@/hooks/useAvailableCameras";
-import { previewDeviceId } from "@/lib/cameraConfig";
-import CameraFeed from "./CameraFeed";
+import { useApi } from "@/contexts/ApiContext";
 
 /**
  * Optional live camera panel for the teleoperation page. Off by default so we
- * never call getUserMedia just by landing on the page (same consent pattern as
- * the calibration camera toggle). SO-101 teleoperation opens no cameras, so the
- * browser can stream them directly while the arm runs.
+ * only request camera streams when the user asks to see them. LeLab owns each
+ * camera connection and serves frames over MJPEG, avoiding a second browser
+ * connection to a device already open on the robot host.
  *
  * A strict mirror of the selected robot's configured cameras: one live feed per
  * camera on the robot record (e.g. "wrist_cam", "webcam"), stacked vertically.
@@ -20,43 +18,31 @@ import CameraFeed from "./CameraFeed";
  * device that wasn't deliberately added to the robot.
  */
 const TeleopCameraPanel: React.FC = () => {
-  const [enabled, setEnabled] = useState(false);
-  // Bumped by the retry button to remount the feeds (a fresh getUserMedia
-  // attempt) — useful if a camera was unplugged and reconnected.
+  const [enabled, setEnabled] = useState(true);
+  // Bumped by the retry button to reconnect the MJPEG feeds.
   const [reloadKey, setReloadKey] = useState(0);
+  const [failedFeeds, setFailedFeeds] = useState<Set<string>>(new Set());
   const { selectedRecord, isLoading: robotsLoading } = useRobots();
+  const { baseUrl } = useApi();
 
-  // Feeds come solely from the robot's configured cameras, streamed by their
-  // stored browser device_id or, in a browser that doesn't know that ID, by
-  // their cv2 index. A configured camera whose device is currently absent still
-  // shows (name + failed-preview placeholder), so the user can tell it's
-  // expected but not detected.
   const configured = selectedRecord?.cameras ?? [];
-  const robotOwnsCameraDevices =
-    selectedRecord?.robot_type === "lerobot_robot_ur" && configured.length > 0;
-  const { cameras: availableCameras } = useAvailableCameras({
-    enabled: enabled && !robotOwnsCameraDevices,
-  });
-  const feeds = configured.map((c) => ({
-    key: c.id,
-    name: c.name,
-    deviceId: previewDeviceId(c, availableCameras),
-    rotation: c.rotation,
-    width: c.width,
-    height: c.height,
-  }));
+
+  const retryFeeds = () => {
+    setFailedFeeds(new Set());
+    setReloadKey((key) => key + 1);
+  };
 
   return (
     <div className="bg-gray-900 rounded-lg p-4 flex flex-col gap-4 h-full">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-medium text-gray-200">Cameras</h2>
         <div className="flex items-center gap-2">
-          {enabled && feeds.length > 0 && (
+          {enabled && configured.length > 0 && (
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => setReloadKey((k) => k + 1)}
+              onClick={retryFeeds}
               className="h-9 w-9 text-gray-400 hover:text-white flex-shrink-0"
               title="Retry camera feeds (e.g. after reconnecting a camera)"
               aria-label="Retry camera feeds"
@@ -65,35 +51,55 @@ const TeleopCameraPanel: React.FC = () => {
             </Button>
           )}
           <Label htmlFor="teleop-camera-toggle" className="text-sm text-gray-400">
-            {robotOwnsCameraDevices ? "Managed by robot" : enabled ? "On" : "Off"}
+            {enabled ? "On" : "Off"}
           </Label>
           <Switch
             id="teleop-camera-toggle"
             checked={enabled}
             onCheckedChange={setEnabled}
-            disabled={robotOwnsCameraDevices}
           />
         </div>
       </div>
 
-      {robotOwnsCameraDevices ? (
-        <p className="text-sm text-gray-500">
-          The UR integration opens these cameras directly. Browser preview is disabled to avoid
-          competing for the camera devices.
-        </p>
-      ) : enabled ? (
-        feeds.length > 0 ? (
+      {enabled ? (
+        configured.length > 0 ? (
           <div className="flex flex-col gap-3 overflow-y-auto">
-            {feeds.map((feed) => (
-              <CameraFeed
-                key={`${feed.key}:${reloadKey}`}
-                deviceId={feed.deviceId}
-                label={feed.name}
-                rotation={feed.rotation}
-                width={feed.width}
-                height={feed.height}
-              />
-            ))}
+            {configured.map((camera) => {
+              const quarterTurn = camera.rotation === 90 || camera.rotation === 270;
+              const width = quarterTurn ? camera.height : camera.width;
+              const height = quarterTurn ? camera.width : camera.height;
+              const src =
+                `${baseUrl}/teleoperation-camera-feed/${encodeURIComponent(camera.name)}` +
+                `?k=${reloadKey}`;
+
+              const failed = failedFeeds.has(camera.name);
+              return (
+                <div
+                  key={`${camera.id}:${reloadKey}`}
+                  className="bg-gray-900 rounded-lg border border-gray-700 overflow-hidden"
+                >
+                  <div style={{ aspectRatio: `${width} / ${height}` }}>
+                    {failed ? (
+                      <div className="w-full h-full flex items-center justify-center text-sm text-gray-400">
+                        Camera feed unavailable. Check the LeLab server logs, then retry.
+                      </div>
+                    ) : (
+                      <img
+                        src={src}
+                        alt={`${camera.name} live feed`}
+                        className="w-full h-full object-contain"
+                        onError={() =>
+                          setFailedFeeds((current) => new Set(current).add(camera.name))
+                        }
+                      />
+                    )}
+                  </div>
+                  <div className="p-2 text-sm text-gray-300 truncate border-t border-gray-800">
+                    {camera.name}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <p className="text-sm text-gray-500">

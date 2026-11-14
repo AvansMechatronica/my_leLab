@@ -642,6 +642,19 @@ def camera_feed(cam_key: str):
     )
 
 
+@app.get("/teleoperation-camera-feed/{cam_key}")
+def teleoperation_camera_feed(cam_key: str):
+    """Live MJPEG preview of one configured camera during teleoperation."""
+    from . import teleoperate
+
+    if not teleoperate.teleoperation_active:
+        raise HTTPException(status_code=409, detail="No active teleoperation session")
+    return StreamingResponse(
+        teleoperate.teleoperation_camera_feed_frames(cam_key),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
 @app.post("/recording-exit-early")
 def recording_exit_early():
     """Skip to next episode (replaces right arrow key)"""
