@@ -135,6 +135,7 @@ export const useRecording = (robot: RobotRecord | null) => {
       follower_config: robot.follower_config,
       robot_type: robot.robot_type || "so101_follower",
       teleoperator_type: robot.teleoperator_type || "so101_leader",
+      ur_action_type: robot.ur_action_type || "movegroup_servo_jog",
       robot_name: robot.name,
       dataset_repo_id: datasetRepoId,
       single_task: singleTask,

@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from lerobot.utils.robot_utils import precise_sleep
 
 from . import episode_media
-from .utils.config import setup_follower_calibration_file
+from .utils.config import DEFAULT_UR_ACTION_TYPE, setup_follower_calibration_file
 from .utils.devices import follower_lock, safe_disconnect_device
 from .utils.robot_devices import (
     SO101_ROBOT_TYPE,
@@ -48,6 +48,7 @@ class ReplayRequest(BaseModel):
     follower_port: str = ""
     follower_config: str = ""
     robot_type: str = SO101_ROBOT_TYPE
+    ur_action_type: str = DEFAULT_UR_ACTION_TYPE
     robot_name: str = ""
     dataset_repo_id: str
     episode_index: int
@@ -96,6 +97,7 @@ def handle_start_replay(request: ReplayRequest) -> dict[str, Any]:
             request.robot_type,
             port=request.follower_port,
             device_id=follower_id,
+            ur_action_type=request.ur_action_type,
         )
         robot = make_robot(config)
         if robot_needs_calibration(request.robot_type):

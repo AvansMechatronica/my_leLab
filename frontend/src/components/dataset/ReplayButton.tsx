@@ -111,6 +111,7 @@ const ReplayButton: React.FC<ReplayButtonProps> = ({ repoId, episodeIndex, onSta
           follower_port: robot.follower_port,
           follower_config: robot.follower_config,
           robot_type: robot.robot_type || "so101_follower",
+          ur_action_type: robot.ur_action_type || "movegroup_servo_jog",
           robot_name: robot.name,
           dataset_repo_id: repoId,
           episode_index: episodeIndex,

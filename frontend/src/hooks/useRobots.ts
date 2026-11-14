@@ -12,6 +12,7 @@ export interface RobotRecord {
   follower_config: string;
   robot_type: string;
   teleoperator_type: string;
+  ur_action_type: string;
   cameras: CameraConfig[];
   is_clean: boolean;
 }

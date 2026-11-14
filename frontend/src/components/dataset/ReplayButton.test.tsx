@@ -41,6 +41,7 @@ const calibrated: RobotRecord = {
   follower_config: "follower.json",
   robot_type: "so101_follower",
   teleoperator_type: "so101_leader",
+  ur_action_type: "movegroup_servo_jog",
   cameras: [],
   is_clean: true,
 };

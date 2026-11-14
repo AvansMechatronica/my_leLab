@@ -1407,6 +1407,17 @@ def upsert_robot(name: str, data: dict, create: bool = False):
     """
     if not is_valid_robot_name(name):
         return JSONResponse(status_code=400, content={"status": "error", "message": "Invalid robot name"})
+    if "ur_action_type" in data and (
+        not isinstance(data["ur_action_type"], str)
+        or data["ur_action_type"] not in config.UR_ACTION_TYPES
+    ):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": f"Unsupported UR action type: {data['ur_action_type']!r}",
+            },
+        )
     try:
         if create:
             if get_robot_record(name) is not None:

@@ -21,12 +21,14 @@ from typing import Any
 from pydantic import BaseModel
 
 from .utils.config import (
+    DEFAULT_UR_ACTION_TYPE,
     setup_calibration_files,
     setup_follower_calibration_file,
     setup_leader_calibration_file,
 )
 from .utils.devices import follower_lock, safe_disconnect_device
 from .utils.robot_devices import (
+    JOINT_JOG_TELEOPERATOR_TYPES,
     SO101_ROBOT_TYPE,
     SO101_TELEOPERATOR_TYPE,
     UR_ROBOT_TYPE,
@@ -35,6 +37,7 @@ from .utils.robot_devices import (
     make_teleoperator,
     make_teleoperator_config,
     robot_needs_calibration,
+    teleoperator_is_persistent,
     teleoperator_needs_calibration,
 )
 
@@ -56,6 +59,7 @@ class TeleoperateRequest(BaseModel):
     follower_config: str = ""
     robot_type: str = SO101_ROBOT_TYPE
     teleoperator_type: str = SO101_TELEOPERATOR_TYPE
+    ur_action_type: str = DEFAULT_UR_ACTION_TYPE
     robot_name: str = ""
     cameras: dict[str, dict[str, Any]] = {}
 
@@ -255,11 +259,13 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
             port=request.follower_port,
             device_id=follower_config_name,
             cameras=request.cameras if request.robot_type == SO101_ROBOT_TYPE else None,
+            ur_action_type=request.ur_action_type,
         )
         teleop_config = make_teleoperator_config(
             request.teleoperator_type,
             port=request.leader_port,
             device_id=leader_config_name,
+            robot_type=request.robot_type,
         )
         # Connect synchronously. If either device fails to connect, clean up the
         # other (so its serial port is released) and report the error — do NOT
@@ -281,14 +287,17 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
             ) from e
 
         logger.info("Connecting to leader arm...")
-        try:
-            if teleoperator_needs_calibration(request.teleoperator_type):
+        if request.teleoperator_type in JOINT_JOG_TELEOPERATOR_TYPES:
+            teleop_device.bind_robot(robot)
+            teleop_device.connect()
+        elif teleoperator_needs_calibration(request.teleoperator_type):
+            try:
                 teleop_device.bus.connect()
-        except Exception as e:
-            raise RuntimeError(
-                f"Could not connect to the leader arm on {request.leader_port}. "
-                "Make sure it's plugged in and powered on, then try again."
-            ) from e
+            except Exception as e:
+                raise RuntimeError(
+                    f"Could not connect to the leader arm on {request.leader_port}. "
+                    "Make sure it's plugged in and powered on, then try again."
+                ) from e
 
         # Feetech motors only store calibration registers with the torque off,
         # which also opens their EEPROM lock.
@@ -314,6 +323,8 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
                 cam.connect()
         if teleoperator_needs_calibration(request.teleoperator_type):
             teleop_device.configure()
+        if request.teleoperator_type in JOINT_JOG_TELEOPERATOR_TYPES:
+            teleop_device.get_action()
         logger.info("Successfully connected to both devices")
 
         current_robot = robot
@@ -350,7 +361,12 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
                         except Exception as e:
                             logger.error(f"Error broadcasting joint data: {e}")
 
-                    time.sleep(0.001)
+                    poll_interval = (
+                        0.05
+                        if request.teleoperator_type in JOINT_JOG_TELEOPERATOR_TYPES
+                        else 0.001
+                    )
+                    time.sleep(poll_interval)
             except Exception as e:
                 logger.error(f"Error during teleoperation loop: {e}")
             finally:
@@ -360,7 +376,7 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
                     _safe_disconnect(robot)
                 else:
                     _disconnect_cameras(managed_cameras)
-                if teleoperator_needs_calibration(request.teleoperator_type):
+                if not teleoperator_is_persistent(request.teleoperator_type):
                     _safe_disconnect(teleop_device)
                 logger.info("Teleoperation stopped")
                 current_robot = None
@@ -385,7 +401,7 @@ def handle_start_teleoperation(request: TeleoperateRequest, websocket_manager=No
             _safe_disconnect(robot)
         elif managed_cameras:
             _disconnect_cameras(managed_cameras)
-        if teleop_device is not None and teleoperator_needs_calibration(request.teleoperator_type):
+        if teleop_device is not None and not teleoperator_is_persistent(request.teleoperator_type):
             _safe_disconnect(teleop_device)
         teleoperation_active = False
         current_robot = None

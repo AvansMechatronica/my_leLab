@@ -25,6 +25,7 @@ test("profile reload keeps valid robots when another robot has an invalid saved 
     follower_config: "follower.json",
     robot_type: "so101_follower",
     teleoperator_type: "so101_leader",
+    ur_action_type: "movegroup_servo_jog",
     is_clean: true,
   };
   mocks.fetcher.mockResolvedValue(new Response(JSON.stringify({ robots: [

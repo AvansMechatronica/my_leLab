@@ -111,6 +111,7 @@ def test_robot_record_save_get_delete_round_trip(tmp_lerobot_home: Path) -> None
     assert loaded["leader_port"] == "/dev/ttyUSB0"
     assert loaded["robot_type"] == "so101_follower"
     assert loaded["teleoperator_type"] == "so101_leader"
+    assert loaded["ur_action_type"] == "movegroup_servo_jog"
 
     listed = cfg.list_robot_records()
     assert any(r["name"] == "lab1" for r in listed)
@@ -157,6 +158,25 @@ def test_ros_robot_record_is_ready_without_ports_or_calibration_files() -> None:
 
     assert is_robot_record_clean(record) is True
     assert is_robot_record_clean({"robot_type": [], "teleoperator_type": "so101_leader"}) is False
+    assert is_robot_record_clean({**record, "ur_action_type": "cartesian_velocity"}) is False
+    assert is_robot_record_clean({**record, "ur_action_type": []}) is False
+
+
+def test_ur_action_type_persists_with_robot_record(tmp_lerobot_home: Path) -> None:
+    from lelab.utils import config as cfg
+
+    record = {
+        "robot_type": "lerobot_robot_ur",
+        "teleoperator_type": "lerobot_teleoperator_teachbot",
+        "ur_action_type": "joint_position",
+    }
+
+    assert cfg.save_robot_record("ur_lab", record)
+    loaded = cfg.get_robot_record("ur_lab")
+
+    assert loaded is not None
+    assert loaded["ur_action_type"] == "joint_position"
+    assert cfg.is_robot_record_clean(loaded) is True
 
 
 def test_so101_robot_record_still_requires_ports_and_calibration_files(

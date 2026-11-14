@@ -9,12 +9,18 @@ from lerobot.robots.so_follower import SO101FollowerConfig
 from lerobot.teleoperators import make_teleoperator_from_config
 from lerobot.teleoperators.so_leader import SO101LeaderConfig
 
+from .config import DEFAULT_UR_ACTION_TYPE, UR_ACTION_TYPES
+
 SO101_ROBOT_TYPE = "so101_follower"
 UR_ROBOT_TYPE = "lerobot_robot_ur"
 SO101_TELEOPERATOR_TYPE = "so101_leader"
 TEACHBOT_TYPE = "lerobot_teleoperator_teachbot"
+KEYBOARD_JOINT_JOG_TYPE = "keyboard_joint_jog"
+GAMEPAD_JOINT_JOG_TYPE = "gamepad_joint_jog"
+JOINT_JOG_TELEOPERATOR_TYPES = {KEYBOARD_JOINT_JOG_TYPE, GAMEPAD_JOINT_JOG_TYPE}
 
 _PERSISTENT_DEVICE_TYPES = {UR_ROBOT_TYPE, TEACHBOT_TYPE}
+_PERSISTENT_TELEOPERATOR_TYPES = {TEACHBOT_TYPE}
 _persistent_devices: dict[tuple[str, str], tuple[str, Any]] = {}
 _persistent_devices_lock = threading.RLock()
 logger = logging.getLogger(__name__)
@@ -28,17 +34,27 @@ def teleoperator_needs_calibration(teleoperator_type: str) -> bool:
     return teleoperator_type == SO101_TELEOPERATOR_TYPE
 
 
+def teleoperator_is_persistent(teleoperator_type: str) -> bool:
+    return teleoperator_type in _PERSISTENT_TELEOPERATOR_TYPES
+
+
 def make_robot_config(
     robot_type: str,
     *,
     port: str,
     device_id: str,
     cameras: dict | None = None,
+    ur_action_type: str = DEFAULT_UR_ACTION_TYPE,
 ):
     if robot_type == SO101_ROBOT_TYPE:
         return SO101FollowerConfig(port=port, id=device_id, cameras=cameras or {})
     if robot_type == UR_ROBOT_TYPE:
-        return import_module("lerobot_robot_ur").UrConfig(id=device_id, cameras=cameras or {})
+        if not isinstance(ur_action_type, str) or ur_action_type not in UR_ACTION_TYPES:
+            raise ValueError(f"Unsupported UR action type: {ur_action_type}")
+        config_module = import_module("lerobot_robot_ur.config_ur")
+        config = import_module("lerobot_robot_ur").UrConfig(id=device_id, cameras=cameras or {})
+        config.ros2_interface.action_type = config_module.ActionType(ur_action_type)
+        return config
     raise ValueError(f"Unsupported robot type: {robot_type}")
 
 
@@ -47,12 +63,22 @@ def make_teleoperator_config(
     *,
     port: str,
     device_id: str,
+    robot_type: str = SO101_ROBOT_TYPE,
 ):
     if teleoperator_type == SO101_TELEOPERATOR_TYPE:
         return SO101LeaderConfig(port=port, id=device_id)
     if teleoperator_type == TEACHBOT_TYPE:
         config_module = import_module("lerobot_teleoperator_teachbot.config_teachbot")
         return config_module.TeachbotConfig(id=device_id)
+    if teleoperator_type in {KEYBOARD_JOINT_JOG_TYPE, GAMEPAD_JOINT_JOG_TYPE}:
+        from ..joint_jog import GamepadJointJogConfig, KeyboardJointJogConfig
+
+        config_class = (
+            KeyboardJointJogConfig
+            if teleoperator_type == KEYBOARD_JOINT_JOG_TYPE
+            else GamepadJointJogConfig
+        )
+        return config_class(id=device_id, robot_type=robot_type)
     raise ValueError(f"Unsupported teleoperator type: {teleoperator_type}")
 
 
@@ -89,6 +115,15 @@ def _make_robot(config: Any) -> Any:
 def _make_teleoperator(config: Any) -> Any:
     if _config_type(config) == TEACHBOT_TYPE:
         return import_module("lerobot_teleoperator_teachbot.teachbot").Teachbot(config)
+    if _config_type(config) in {KEYBOARD_JOINT_JOG_TYPE, GAMEPAD_JOINT_JOG_TYPE}:
+        from ..joint_jog import GamepadJointJogTeleoperator, KeyboardJointJogTeleoperator
+
+        teleoperator_class = (
+            KeyboardJointJogTeleoperator
+            if _config_type(config) == KEYBOARD_JOINT_JOG_TYPE
+            else GamepadJointJogTeleoperator
+        )
+        return teleoperator_class(config)
     return make_teleoperator_from_config(config)
 
 

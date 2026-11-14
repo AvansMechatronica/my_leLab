@@ -5,6 +5,7 @@ export interface StartInferenceRequest {
   follower_port: string;
   follower_config: string;
   robot_type: string;
+  ur_action_type: string;
   robot_name: string;
   policy_ref: string;
   task: string;

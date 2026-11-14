@@ -30,6 +30,7 @@ from lerobot.scripts.lerobot_record import RecordConfig
 from .camera_config import lerobot_camera_settings, validate_camera_rotations
 from .episode_media import UnreadableDatasetError, ensure_episode_index
 from .utils.config import (
+    DEFAULT_UR_ACTION_TYPE,
     setup_calibration_files,
     setup_follower_calibration_file,
     setup_leader_calibration_file,
@@ -37,6 +38,7 @@ from .utils.config import (
 )
 from .utils.devices import follower_lock, safe_disconnect_device
 from .utils.robot_devices import (
+    JOINT_JOG_TELEOPERATOR_TYPES,
     SO101_ROBOT_TYPE,
     SO101_TELEOPERATOR_TYPE,
     make_robot,
@@ -44,6 +46,7 @@ from .utils.robot_devices import (
     make_teleoperator,
     make_teleoperator_config,
     robot_needs_calibration,
+    teleoperator_is_persistent,
     teleoperator_needs_calibration,
 )
 
@@ -78,6 +81,7 @@ class RecordingRequest(BaseModel):
     follower_config: str = ""
     robot_type: str = SO101_ROBOT_TYPE
     teleoperator_type: str = SO101_TELEOPERATOR_TYPE
+    ur_action_type: str = DEFAULT_UR_ACTION_TYPE
     robot_name: str = ""
     dataset_repo_id: str
     single_task: str
@@ -221,12 +225,14 @@ def create_record_config(request: RecordingRequest) -> RecordConfig:
         port=request.follower_port,
         device_id=follower_config_name,
         cameras=camera_configs,
+        ur_action_type=request.ur_action_type,
     )
 
     teleop_config = make_teleoperator_config(
         request.teleoperator_type,
         port=request.leader_port,
         device_id=leader_config_name,
+        robot_type=request.robot_type,
     )
 
     # Create dataset config
@@ -825,10 +831,8 @@ def record_with_web_events(cfg: RecordConfig, web_events: dict) -> LeRobotDatase
     robot_type = cfg.robot.type
     teleoperator_type = cfg.teleop.type if cfg.teleop is not None else None
     persistent_robot = not robot_needs_calibration(robot_type)
-    persistent_teleop = (
-        teleop is not None
-        and teleoperator_type is not None
-        and not teleoperator_needs_calibration(teleoperator_type)
+    persistent_teleop = teleop is not None and teleoperator_type is not None and teleoperator_is_persistent(
+        teleoperator_type
     )
 
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
@@ -896,7 +900,12 @@ def record_with_web_events(cfg: RecordConfig, web_events: dict) -> LeRobotDatase
             try:
                 logger.info("🔧 TELEOP CONNECTION: Attempting to connect teleoperator...")
                 if not persistent_teleop:
-                    teleop.bus.connect()
+                    if teleoperator_needs_calibration(teleoperator_type):
+                        teleop.bus.connect()
+                    else:
+                        if teleoperator_type in JOINT_JOG_TELEOPERATOR_TYPES:
+                            teleop.bind_robot(robot)
+                        teleop.connect()
                 logger.info("✅ TELEOP CONNECTION: Teleoperator bus connected successfully")
             except Exception as e:
                 logger.error(f"❌ TELEOP CONNECTION: Failed to connect teleoperator: {e}")
@@ -908,7 +917,7 @@ def record_with_web_events(cfg: RecordConfig, web_events: dict) -> LeRobotDatase
             logger.info("Writing follower calibration to motors...")
             robot.bus.disable_torque()
             robot.bus.write_calibration(robot.calibration)
-        if teleop is not None and not persistent_teleop:
+        if teleop is not None and teleoperator_needs_calibration(teleoperator_type):
             logger.info("Writing leader calibration to motors...")
             teleop.bus.disable_torque()
             teleop.bus.write_calibration(teleop.calibration)

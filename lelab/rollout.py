@@ -40,9 +40,9 @@ from pydantic import BaseModel, field_validator
 from lerobot.utils.device_utils import auto_select_torch_device
 
 from .camera_config import lerobot_camera_settings, validate_camera_rotations
-from .utils.config import setup_follower_calibration_file
+from .utils.config import DEFAULT_UR_ACTION_TYPE, UR_ACTION_TYPES, setup_follower_calibration_file
 from .utils.devices import follower_lock
-from .utils.robot_devices import SO101_ROBOT_TYPE, robot_needs_calibration
+from .utils.robot_devices import SO101_ROBOT_TYPE, UR_ROBOT_TYPE, robot_needs_calibration
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ class InferenceRequest(BaseModel):
     follower_port: str = ""
     follower_config: str = ""
     robot_type: str = SO101_ROBOT_TYPE
+    ur_action_type: str = DEFAULT_UR_ACTION_TYPE
     robot_name: str = ""
     policy_ref: str  # opaque ref returned by /jobs/{id}/checkpoints
     task: str = ""
@@ -61,6 +62,13 @@ class InferenceRequest(BaseModel):
     @classmethod
     def validate_rotations(cls, cameras: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         return validate_camera_rotations(cameras)
+
+    @field_validator("ur_action_type")
+    @classmethod
+    def validate_ur_action_type(cls, action_type: str) -> str:
+        if action_type not in UR_ACTION_TYPES:
+            raise ValueError(f"Unsupported UR action type: {action_type}")
+        return action_type
 
 
 inference_active: bool = False
@@ -364,6 +372,8 @@ def handle_start_inference(request: InferenceRequest) -> dict[str, Any]:
         ]
         if robot_needs_calibration(request.robot_type):
             cmd.append(f"--robot.port={request.follower_port}")
+        elif request.robot_type == UR_ROBOT_TYPE:
+            cmd.append(f"--robot.ros2_interface.action_type={request.ur_action_type}")
         if request.cameras:
             cmd.append(f"--robot.cameras={_format_cameras_arg(request.cameras)}")
 

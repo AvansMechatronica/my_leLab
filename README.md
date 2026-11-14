@@ -63,7 +63,7 @@ leLab
     </tr>
     <tr>
       <td>🕹️ <b>Teleoperate</b></td>
-      <td>Move the leader, the follower mirrors it. Live joint streaming.</td>
+      <td>Move a SO-101 leader, use keyboard/gamepad joint jogging, or use a ROS 2 leader. Live joint streaming.</td>
     </tr>
     <tr>
       <td>📹 <b>Record</b></td>
@@ -103,6 +103,14 @@ pip install -e my_lerobot_ros/lerobot-teleoperator-teachbot
 ```
 
 Start the ROS 2 robot and Teachbot drivers before starting a LeLab session. Select **Universal Robot (ROS 2)** and **Teachbot (ROS 2)** in the device setup page; LeLab keeps their ROS connections open between teleoperation, recording, and replay sessions and closes them when the app exits.
+
+## Keyboard and gamepad teleoperation
+
+Select **Keyboard (joint jog)** or **Gamepad (joint jog)** as the teleoperator in the device setup page. These controls do not need a serial port or calibration file; connect the input device to the computer running LeLab.
+
+For the keyboard, hold `Q/A`, `W/S`, `E/D`, `R/F`, `T/G`, and `Y/H` to jog the arm joints in opposite directions. `U/J` jogs the gripper. SO-101 uses the first five joint pairs; UR uses all six.
+
+For a gamepad, the left and right sticks jog the first four joints, the left/right bumpers jog the fifth joint, the D-pad up/down jogs the sixth joint, and the two trigger buttons open/close the gripper. Controls for joints absent from a robot are ignored.
 
 ## Camera rotation
 

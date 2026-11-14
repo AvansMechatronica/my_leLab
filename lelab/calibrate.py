@@ -40,6 +40,7 @@ from lerobot.utils.utils import init_logging
 from .utils.config import is_valid_robot_name
 from .utils.devices import safe_disconnect_device
 from .utils.robot_devices import (
+    JOINT_JOG_TELEOPERATOR_TYPES,
     SO101_ROBOT_TYPE,
     SO101_TELEOPERATOR_TYPE,
     TEACHBOT_TYPE,
@@ -184,7 +185,11 @@ class CalibrationManager:
                     supported_types = (
                         {SO101_ROBOT_TYPE, UR_ROBOT_TYPE}
                         if request.device_type == "robot"
-                        else {SO101_TELEOPERATOR_TYPE, TEACHBOT_TYPE}
+                        else {
+                            SO101_TELEOPERATOR_TYPE,
+                            TEACHBOT_TYPE,
+                            *JOINT_JOG_TELEOPERATOR_TYPES,
+                        }
                     )
                     if device_type not in supported_types:
                         return {"success": False, "message": "Unsupported device integration"}

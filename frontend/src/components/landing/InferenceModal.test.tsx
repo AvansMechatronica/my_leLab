@@ -33,7 +33,7 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
 }));
 const robot: RobotRecord = {
-  name: "so101", leader_port: "leader", follower_port: "follower", leader_config: "leader.json", follower_config: "follower.json", robot_type: "so101_follower", teleoperator_type: "so101_leader", is_clean: true,
+  name: "so101", leader_port: "leader", follower_port: "follower", leader_config: "leader.json", follower_config: "follower.json", robot_type: "so101_follower", teleoperator_type: "so101_leader", ur_action_type: "movegroup_servo_jog", is_clean: true,
   cameras: [
     { id: "wrist", name: "wrist", type: "opencv", device_id: "usb-wrist", camera_index: 1, width: 640, height: 480, rotation: 90 },
     { id: "top", name: "top", type: "opencv", device_id: "usb-top", camera_index: 2, width: 640, height: 480, rotation: 180 },

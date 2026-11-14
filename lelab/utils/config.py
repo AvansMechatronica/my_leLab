@@ -44,6 +44,15 @@ FOLLOWER_CONFIG_FILE = os.path.join(CONFIG_STORAGE_PATH, "follower_config.txt")
 # Robot config records (per-robot JSON metadata)
 ROBOTS_PATH = os.path.expanduser("~/.cache/huggingface/lerobot/robots")
 
+DEFAULT_UR_ACTION_TYPE = "movegroup_servo_jog"
+UR_ACTION_TYPES = frozenset(
+    {
+        DEFAULT_UR_ACTION_TYPE,
+        "movegroup_follow_joint_trajectory",
+        "joint_position",
+    }
+)
+
 # Saved camera reference frames, one PNG per robot/camera (see lelab/camera_reference.py)
 CAMERA_REFERENCES_PATH = os.path.expanduser("~/.cache/huggingface/lerobot/camera_references")
 
@@ -354,6 +363,7 @@ _ROBOT_STRING_FIELDS = (
     "follower_config",
     "robot_type",
     "teleoperator_type",
+    "ur_action_type",
 )
 _ROBOT_LIST_FIELDS = ("cameras",)
 
@@ -377,6 +387,7 @@ def _empty_record(name: str) -> dict:
         record[field] = ""
     record["robot_type"] = "so101_follower"
     record["teleoperator_type"] = "so101_leader"
+    record["ur_action_type"] = DEFAULT_UR_ACTION_TYPE
     for field in _ROBOT_LIST_FIELDS:
         record[field] = []
     return record
@@ -477,8 +488,22 @@ def is_robot_record_clean(record: dict) -> bool:
         return False
     if robot_type not in {"so101_follower", "lerobot_robot_ur"}:
         return False
-    if teleoperator_type not in {"so101_leader", "lerobot_teleoperator_teachbot"}:
+    if teleoperator_type not in {
+        "so101_leader",
+        "lerobot_teleoperator_teachbot",
+        "keyboard_joint_jog",
+        "gamepad_joint_jog",
+    }:
         return False
+    if teleoperator_type in {"keyboard_joint_jog", "gamepad_joint_jog"} and robot_type not in {
+        "so101_follower",
+        "lerobot_robot_ur",
+    }:
+        return False
+    ur_action_type = record.get("ur_action_type", DEFAULT_UR_ACTION_TYPE)
+    if robot_type == "lerobot_robot_ur":
+        if not isinstance(ur_action_type, str) or ur_action_type not in UR_ACTION_TYPES:
+            return False
 
     if robot_type == "so101_follower":
         if not all(

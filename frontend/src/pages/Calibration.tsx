@@ -76,6 +76,7 @@ interface RobotRecord {
   follower_config: string;
   robot_type: string;
   teleoperator_type: string;
+  ur_action_type: string;
   cameras: CameraConfig[];
   is_clean: boolean;
 }
@@ -94,6 +95,7 @@ const Calibration = () => {
   const [deviceType, setDeviceType] = useState<string>("teleop");
   const [robotType, setRobotType] = useState("so101_follower");
   const [teleoperatorType, setTeleoperatorType] = useState("so101_leader");
+  const [urActionType, setUrActionType] = useState("movegroup_servo_jog");
   const [port, setPort] = useState<string>("");
   const [robot, setRobot] = useState<RobotRecord | null>(null);
   const [cameras, setCameras] = useState<CameraConfig[]>([]);
@@ -129,6 +131,7 @@ const Calibration = () => {
       if (!r || cancelled) return;
       setRobotType(r.robot_type || "so101_follower");
       setTeleoperatorType(r.teleoperator_type || "so101_leader");
+      setUrActionType(r.ur_action_type || "movegroup_servo_jog");
       // Default to the first incomplete side in the checklist (leader, then follower).
       const defaultDevice = !r.leader_config
         ? "teleop"
@@ -437,6 +440,10 @@ const Calibration = () => {
   const selectedDeviceNeedsCalibration =
     selectedIntegrationType === "so101_follower" ||
     selectedIntegrationType === "so101_leader";
+  const isJointJogTeleoperator =
+    deviceType === "teleop" &&
+    (selectedIntegrationType === "keyboard_joint_jog" ||
+      selectedIntegrationType === "gamepad_joint_jog");
 
   const saveDeviceIntegration = async () => {
     if (!robotName) return;
@@ -454,6 +461,9 @@ const Calibration = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             [typeField]: selectedIntegrationType,
+            ...(deviceType === "robot" && selectedIntegrationType === "lerobot_robot_ur"
+              ? { ur_action_type: urActionType }
+              : {}),
             ...(selectedDeviceNeedsCalibration
               ? {}
               : { [configField]: "", [portField]: "" }),
@@ -742,11 +752,64 @@ const Calibration = () => {
                       <>
                         <SelectItem value="so101_leader">SO-101 Leader</SelectItem>
                         <SelectItem value="lerobot_teleoperator_teachbot">Teachbot (ROS 2)</SelectItem>
+                        <SelectItem value="keyboard_joint_jog">Keyboard (joint jog)</SelectItem>
+                        <SelectItem value="gamepad_joint_jog">Gamepad (joint jog)</SelectItem>
                       </>
                     )}
                   </SelectContent>
                 </Select>
               </div>
+
+              {deviceType === "robot" && selectedIntegrationType === "lerobot_robot_ur" && (
+                <div className="space-y-2">
+                  <Label htmlFor="urActionType" className="text-sm font-medium text-slate-300">
+                    UR control mode
+                  </Label>
+                  <Select value={urActionType} onValueChange={setUrActionType}>
+                    <SelectTrigger
+                      id="urActionType"
+                      className="bg-slate-700 border-slate-600 text-white rounded-md"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-700 text-white">
+                      <SelectItem value="movegroup_servo_jog">
+                        MoveGroup Servo Jog (default)
+                      </SelectItem>
+                      <SelectItem value="movegroup_servo_twist" disabled>
+                        MoveGroup Servo Twist (requires an unsupported teleoperator)
+                      </SelectItem>
+                      <SelectItem value="movegroup_follow_joint_trajectory">
+                        MoveGroup Follow Joint Trajectory
+                      </SelectItem>
+                      <SelectItem value="joint_position">Joint Position</SelectItem>
+                      <SelectItem value="movegroup_servo_pose" disabled>
+                        MoveGroup Servo Pose (not implemented)
+                      </SelectItem>
+                      <SelectItem value="cartesian_velocity" disabled>
+                        Cartesian Velocity (not implemented)
+                      </SelectItem>
+                      <SelectItem value="none" disabled>
+                        None (not usable for teleoperation)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-slate-400">
+                    Joint Jog, Follow Joint Trajectory, and Joint Position are
+                    available. Twist requires a teleoperator that LeLab does
+                    not currently integrate; Servo Pose, Cartesian Velocity,
+                    and None are unavailable for teleoperation.
+                  </p>
+                  <a
+                    href="https://avansmechatronica.github.io/my_lerobot_ros/documentation/movegroup_control_modes.html"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-block text-xs text-blue-400 underline hover:text-blue-300"
+                  >
+                    UR control-mode details
+                  </a>
+                </div>
+              )}
 
               {selectedDeviceNeedsCalibration ? (
               <div className="space-y-2">
@@ -776,8 +839,9 @@ const Calibration = () => {
                 <Alert className="bg-blue-900/40 border-blue-700 text-blue-100">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>
-                    This ROS device uses the existing ROS connection and does
-                    not require a LeRobot calibration file or serial port.
+                    {isJointJogTeleoperator
+                      ? "Connect the keyboard or gamepad to the computer running LeLab. No serial port or calibration is required."
+                      : "This ROS device uses the existing ROS connection and does not require a LeRobot calibration file or serial port."}
                   </AlertDescription>
                 </Alert>
               )}
@@ -861,19 +925,31 @@ const Calibration = () => {
                     Robot calibration
                   </div>
                   <div className="flex items-center gap-2 text-sm">
-                    {robot.teleoperator_type === "lerobot_teleoperator_teachbot" || robot.leader_config ? (
+                    {robot.teleoperator_type === "lerobot_teleoperator_teachbot" ||
+                    robot.teleoperator_type === "keyboard_joint_jog" ||
+                    robot.teleoperator_type === "gamepad_joint_jog" ||
+                    robot.leader_config ? (
                       <CheckCircle className="w-4 h-4 text-green-400" />
                     ) : (
                       <Circle className="w-4 h-4 text-slate-500" />
                     )}
                     <span
                       className={
-                        robot.teleoperator_type === "lerobot_teleoperator_teachbot" || robot.leader_config ? "text-slate-200" : "text-slate-400"
+                        robot.teleoperator_type === "lerobot_teleoperator_teachbot" ||
+                        robot.teleoperator_type === "keyboard_joint_jog" ||
+                        robot.teleoperator_type === "gamepad_joint_jog" ||
+                        robot.leader_config
+                          ? "text-slate-200"
+                          : "text-slate-400"
                       }
                     >
                       Leader (Teleoperator)
                       {robot.teleoperator_type === "lerobot_teleoperator_teachbot" ? (
                         <span className="text-slate-500"> · Teachbot (no calibration)</span>
+                      ) : robot.teleoperator_type === "keyboard_joint_jog" ? (
+                        <span className="text-slate-500"> · Keyboard (no calibration)</span>
+                      ) : robot.teleoperator_type === "gamepad_joint_jog" ? (
+                        <span className="text-slate-500"> · Gamepad (no calibration)</span>
                       ) : robot.leader_config && (
                         <span className="text-slate-500"> · {robot.leader_config}</span>
                       )}
